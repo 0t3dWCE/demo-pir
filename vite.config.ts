@@ -5,6 +5,8 @@ import { createServer } from "./server";
 
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => ({
+  // Для GitHub Pages: заменить "/demo-pir/" на имя вашего репозитория
+  base: mode === "production" ? "/demo-pir/" : "/",
   server: {
     host: "::",
     port: 8080,
