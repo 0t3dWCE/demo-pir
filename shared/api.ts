@@ -214,6 +214,10 @@ export function getProjectMeta(projectId: string): { name: string } | undefined 
   return PROJECT_META[projectId];
 }
 
+export function listProjects(): Array<{ id: string; name: string }> {
+  return Object.entries(PROJECT_META).map(([id, meta]) => ({ id, name: meta.name }));
+}
+
 export function setProjectExternalId(projectId: string, externalObjectId: string) {
   PROJECT_EXTERNAL[projectId] = externalObjectId;
 }
@@ -437,4 +441,76 @@ export function getObjectFolderPaths(): string[] {
   };
   MOCK_OBJECT_FOLDERS.forEach((root) => dfs(root, []));
   return paths;
+}
+
+// ------------------ Документы по объекту (мок) ------------------
+
+export interface SimpleDocument {
+  id: string;
+  name: string;
+}
+
+const MOCK_PROJECT_DOCUMENTS: Record<string, SimpleDocument[]> = {
+  '1': [
+    { id: 'doc-1', name: 'Архитектурные решения - Планы этажей' },
+    { id: 'doc-2', name: '02 - ИРД / Разрешения' },
+    { id: 'doc-3', name: '07 - ПД / Общая пояснительная записка' }
+  ],
+  '2': [
+    { id: 'doc-4', name: 'Конструктивные решения - Фундамент' },
+    { id: 'doc-5', name: 'Электроснабжение - Схемы питания' }
+  ],
+  '3': [
+    { id: 'doc-6', name: 'Заключение экспертизы' }
+  ]
+};
+
+export async function getProjectDocuments(projectId: string): Promise<SimpleDocument[]> {
+  await new Promise((r) => setTimeout(r, 120));
+  if (MOCK_PROJECT_DOCUMENTS[projectId]) return MOCK_PROJECT_DOCUMENTS[projectId];
+  const meta = PROJECT_META[projectId];
+  // Сгенерируем несколько документов для внешних объектов
+  return [
+    { id: `${projectId}-doc-a`, name: `${meta?.name || 'Объект'} / Исходные данные` },
+    { id: `${projectId}-doc-b`, name: `${meta?.name || 'Объект'} / Пояснительная записка` },
+    { id: `${projectId}-doc-c`, name: `${meta?.name || 'Объект'} / Чертежи разделов` }
+  ];
+}
+
+// ------------------ Исполнители по объекту (мок) ------------------
+
+export interface AssigneeInfo {
+  id: string;
+  name: string;
+  role: string; // например: Руководитель подразделения, Инженер и т.д.
+  isRpp?: boolean; // РПП
+}
+
+const MOCK_PROJECT_ASSIGNEES: Record<string, AssigneeInfo[]> = {
+  '1': [
+    { id: 'rpp-1', name: 'Анна Смирнова', role: 'Руководитель подразделения', isRpp: true },
+    { id: 'emp-1', name: 'Петр Иванов', role: 'Главный архитектор' },
+    { id: 'emp-2', name: 'Михаил Козлов', role: 'Инженер ОВ' }
+  ],
+  '2': [
+    { id: 'rpp-2', name: 'Дмитрий Петров', role: 'Руководитель подразделения', isRpp: true },
+    { id: 'emp-3', name: 'Анна Сидорова', role: 'Инженер-конструктор' },
+    { id: 'emp-4', name: 'Ольга Смирнова', role: 'Инженер-электрик' }
+  ],
+  '3': [
+    { id: 'rpp-3', name: 'Елена Волкова', role: 'Руководитель подразделения', isRpp: true },
+    { id: 'emp-5', name: 'Дмитрий Петров', role: 'Эксперт' }
+  ]
+};
+
+export async function getProjectAssignees(projectId: string): Promise<AssigneeInfo[]> {
+  await new Promise((r) => setTimeout(r, 100));
+  const known = MOCK_PROJECT_ASSIGNEES[projectId];
+  if (known) return known;
+  const meta = PROJECT_META[projectId]?.name || 'Объект';
+  return [
+    { id: `${projectId}-rpp`, name: `${meta} — РПП`, role: 'Руководитель подразделения', isRpp: true },
+    { id: `${projectId}-eng-a`, name: 'Инженер А', role: 'Инженер' },
+    { id: `${projectId}-eng-b`, name: 'Инженер Б', role: 'Инженер' }
+  ];
 }

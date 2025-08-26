@@ -7,7 +7,7 @@ import { Link, useLocation } from 'react-router-dom';
 const roleLabels: Record<UserRole, string> = {
   'root-admin': 'Root-администратор',
   'company-admin': 'Администратор компании',
-  'customer': 'Заказчик',
+  'customer': 'Технический заказчик',
   'project-manager': 'Менеджер проекта',
   'designer': 'Проектировщик',
   'reviewer': 'Согласующий'
@@ -67,7 +67,7 @@ export default function Header() {
             <SelectTrigger className="w-64 text-sm">
               <SelectValue />
             </SelectTrigger>
-            <SelectContent>
+            <SelectContent className="w-64">
               {Object.entries(roleLabels).map(([role, label]) => (
                 <SelectItem key={role} value={role}>
                   {label}

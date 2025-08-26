@@ -22,6 +22,7 @@ import ContractDetail from "./pages/ContractDetail";
 import Monitoring from "./pages/Monitoring";
 import Documents from "./pages/Documents";
 import Tasks from "./pages/Tasks";
+import TaskDetail from "./pages/TaskDetail";
 import Processes from "./pages/Processes";
 import Team from "./pages/Team";
 import ObjectTeam from "./pages/ObjectTeam";
@@ -79,6 +80,7 @@ const App = () => (
             />
             <Route path="/documents" element={<Documents />} />
             <Route path="/tasks" element={<Tasks />} />
+            <Route path="/tasks/:id" element={<TaskDetail />} />
             <Route 
               path="/reports" 
               element={

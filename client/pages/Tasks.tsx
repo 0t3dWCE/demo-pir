@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Layout from '../components/Layout';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -31,6 +31,19 @@ import {
   Flag,
   Users
 } from 'lucide-react';
+import { listProjects, getProjectDocuments, SimpleDocument, getProjectAssignees, AssigneeInfo } from '../../shared/api';
+
+interface CommentItem {
+  author: string;
+  date: string;
+  text: string;
+}
+
+interface HistoryItem {
+  author: string;
+  date: string;
+  decision: string;
+}
 
 interface Task {
   id: string;
@@ -51,9 +64,34 @@ interface Task {
   comments: number;
   attachments: number;
   progress?: number;
+  commentsList?: CommentItem[];
+  history?: HistoryItem[];
 }
 
 const mockTasks: Task[] = [
+  // Демо-поручение для Технического заказчика (черновик)
+  {
+    id: 'task-draft-demo',
+    title: 'Подготовить перечень исходных данных',
+    description: 'Сформировать перечень ИРД для стартового пакета по объекту',
+    status: 'draft',
+    priority: 'medium',
+    assignee: 'Анна Смирнова',
+    assigneeRole: 'Руководитель подразделения',
+    creator: 'Анна Смирнова',
+    creatorRole: 'Технический заказчик',
+    projectName: 'ЖК «Северный парк»',
+    projectId: '1',
+    relatedDocuments: [],
+    dueDate: '2025-12-31',
+    createdDate: '2025-01-01',
+    comments: 0,
+    attachments: 0,
+    commentsList: [],
+    history: [
+      { author: 'Система', date: '2025-01-01', decision: 'создано' }
+    ]
+  },
   {
     id: 'task-1',
     title: 'Проверить архитектурные решения',
@@ -71,13 +109,23 @@ const mockTasks: Task[] = [
     createdDate: '2024-01-20',
     comments: 3,
     attachments: 2,
-    progress: 65
+    progress: 65,
+    commentsList: [
+      { author: 'Анна Смирнова', date: '2024-01-20', text: 'Проверьте соответствие по разделу АР.' },
+      { author: 'Петр Иванов', date: '2024-01-21', text: 'Замечания учту, подготовлю правки.' },
+      { author: 'Анна Смирнова', date: '2024-01-22', text: 'Ок, жду обновления к утру.' }
+    ],
+    history: [
+      { author: 'Анна Смирнова', date: '2024-01-20', decision: 'создано' },
+      { author: 'Петр Иванов', date: '2024-01-21', decision: 'зафиксировано решение' },
+      { author: 'Анна Смирнова', date: '2024-01-22', decision: 'отправлено на доработку' }
+    ]
   },
   {
     id: 'task-2',
     title: 'Согла��овать конструктивные решения',
     description: 'Рассмотреть и согласовать предложенные конструктивные решения фундамента',
-    status: 'under-review',
+    status: 'in-progress',
     priority: 'medium',
     assignee: 'Анна Смирнова',
     assigneeRole: 'Технический директор',
@@ -90,13 +138,25 @@ const mockTasks: Task[] = [
     createdDate: '2024-01-18',
     comments: 5,
     attachments: 1,
-    progress: 90
+    progress: 90,
+    commentsList: [
+      { author: 'Анна Сидорова', date: '2024-01-18', text: 'Прошу согласовать раздел КР: фундамент.' },
+      { author: 'Анна Смирнова', date: '2024-01-19', text: 'Нужны расчетные обоснования.' },
+      { author: 'Анна Сидорова', date: '2024-01-20', text: 'Добавила пояснение и расчеты.' },
+      { author: 'Анна Смирнова', date: '2024-01-21', text: 'Ок, на проверке.' },
+      { author: 'Анна Сидорова', date: '2024-01-22', text: 'Готово.' }
+    ],
+    history: [
+      { author: 'Анна Сидорова', date: '2024-01-18', decision: 'создано' },
+      { author: 'Анна Смирнова', date: '2024-01-19', decision: 'отправлено на доработку' },
+      { author: 'Анна Сидорова', date: '2024-01-20', decision: 'зафиксировано решение' }
+    ]
   },
   {
     id: 'task-3',
     title: 'Внести исправления в схему отопления',
     description: 'По результатам согласования внести замечания в схему системы отопления',
-    status: 'overdue',
+    status: 'in-progress',
     priority: 'high',
     assignee: 'Михаил Козлов',
     assigneeRole: 'Инженер ОВ',
@@ -109,6 +169,16 @@ const mockTasks: Task[] = [
     createdDate: '2024-01-15',
     comments: 8,
     attachments: 3
+    ,
+    commentsList: [
+      { author: 'Михаил Козлов', date: '2024-01-16', text: 'Отмечу замечания по трассировке.' },
+      { author: 'Анна Смирнова', date: '2024-01-17', text: 'Верните на согласование после исправлений.' },
+      { author: 'Михаил Козлов', date: '2024-01-18', text: 'Исправлено, проверьте.' }
+    ],
+    history: [
+      { author: 'Анна Смирнова', date: '2024-01-15', decision: 'создано' },
+      { author: 'Михаил Козлов', date: '2024-01-18', decision: 'зафиксировано решение' }
+    ]
   },
   {
     id: 'task-4',
@@ -128,7 +198,15 @@ const mockTasks: Task[] = [
     completedDate: '2024-01-19',
     comments: 2,
     attachments: 1,
-    progress: 100
+    progress: 100,
+    commentsList: [
+      { author: 'Елена Волкова', date: '2024-01-18', text: 'Заключение приложено.' },
+      { author: 'Дмитрий Петров', date: '2024-01-19', text: 'Подписал документ.' }
+    ],
+    history: [
+      { author: 'Елена Волкова', date: '2024-01-10', decision: 'создано' },
+      { author: 'Дмитрий Петров', date: '2024-01-19', decision: 'вопрос решен' }
+    ]
   },
   {
     id: 'task-5',
@@ -147,16 +225,20 @@ const mockTasks: Task[] = [
     createdDate: '2024-01-21',
     comments: 0,
     attachments: 0
+    ,
+    commentsList: [
+      { author: 'Марсель Габдуллинов', date: '2024-01-21', text: 'Нужно проверить расчеты по ТП 10/0.4.' }
+    ],
+    history: [
+      { author: 'Марсель Габдуллинов', date: '2024-01-21', decision: 'создано' }
+    ]
   }
 ];
 
 const statusConfig = {
   'draft': { label: 'Черновик', color: 'bg-gray-500', icon: Edit },
   'in-progress': { label: 'В работе', color: 'bg-blue-500', icon: Clock },
-  'under-review': { label: 'На проверке', color: 'bg-yellow-500', icon: Eye },
-  'completed': { label: 'Выполнено', color: 'bg-green-500', icon: CheckCircle },
-  'cancelled': { label: 'Отменено', color: 'bg-gray-600', icon: XCircle },
-  'overdue': { label: 'Просрочено', color: 'bg-red-500', icon: AlertCircle }
+  'completed': { label: 'Выполнено', color: 'bg-green-500', icon: CheckCircle }
 };
 
 const priorityConfig = {
@@ -174,8 +256,38 @@ export default function Tasks() {
   const [projectFilter, setProjectFilter] = useState('all');
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [activeTab, setActiveTab] = useState('all-tasks');
+  const [tasks, setTasks] = useState<Task[]>(mockTasks);
+  const [availableProjects, setAvailableProjects] = useState<Array<{id: string; name: string}>>([]);
+  const [selectedProjectId, setSelectedProjectId] = useState<string | undefined>(undefined);
+  const [relatedDocs, setRelatedDocs] = useState<SimpleDocument[]>([]);
+  const [selectedDocIds, setSelectedDocIds] = useState<Record<string, boolean>>({});
+  const [assignees, setAssignees] = useState<AssigneeInfo[]>([]);
 
-  const filteredTasks = mockTasks.filter(task => {
+  useEffect(() => {
+    setAvailableProjects(listProjects());
+  }, []);
+
+  useEffect(() => {
+    const loadDocs = async () => {
+      if (!selectedProjectId) { setRelatedDocs([]); setSelectedDocIds({}); return; }
+      const docs = await getProjectDocuments(selectedProjectId);
+      setRelatedDocs(docs);
+      const initial: Record<string, boolean> = {};
+      docs.forEach(d => initial[d.id] = false);
+      setSelectedDocIds(initial);
+    };
+    const loadAssignees = async () => {
+      if (!selectedProjectId) { setAssignees([]); setFormAssignee(undefined); return; }
+      const list = await getProjectAssignees(selectedProjectId);
+      setAssignees(list);
+      const rpp = list.find(a => a.isRpp);
+      setFormAssignee(rpp?.id);
+    };
+    loadDocs();
+    loadAssignees();
+  }, [selectedProjectId]);
+
+  const filteredTasks = tasks.filter(task => {
     const matchesSearch = task.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
                          task.description.toLowerCase().includes(searchTerm.toLowerCase()) ||
                          task.assignee.toLowerCase().includes(searchTerm.toLowerCase());
@@ -190,13 +302,10 @@ export default function Tasks() {
   const getTabTasks = () => {
     switch (activeTab) {
       case 'my-tasks':
-        return filteredTasks.filter(task => task.assignee === currentUser.name);
+        // входящие поручения на меня (исключая черновики)
+        return filteredTasks.filter(task => task.assignee === currentUser.name && task.status !== 'draft');
       case 'created-by-me':
         return filteredTasks.filter(task => task.creator === currentUser.name);
-      case 'overdue':
-        return filteredTasks.filter(task => task.status === 'overdue');
-      case 'under-review':
-        return filteredTasks.filter(task => task.status === 'under-review');
       default:
         return filteredTasks;
     }
@@ -206,18 +315,95 @@ export default function Tasks() {
 
   const canCreateTask = ['project-manager', 'customer', 'company-admin', 'root-admin'].includes(currentUser.role);
 
+  // Поля формы создания поручения
+  const [formTitle, setFormTitle] = useState('');
+  const [formDescription, setFormDescription] = useState('');
+  const [formAssignee, setFormAssignee] = useState<string | undefined>(undefined);
+  const [formDueDate, setFormDueDate] = useState<string>('');
+  const [formPriority, setFormPriority] = useState<'low' | 'medium' | 'high' | undefined>(undefined);
+
   const handleCreateTask = () => {
-    console.log('Creating new task');
+    if (!formTitle || !formDescription || !formAssignee || !formDueDate || !selectedProjectId) {
+      console.log('Заполните обязательные поля');
+      return;
+    }
+    const projectName = availableProjects.find(p => p.id === selectedProjectId)?.name || '';
+    const assigneeName = assignees.find(a => a.id === formAssignee)?.name || '';
+    const assigneeRole = assignees.find(a => a.id === formAssignee)?.role || '';
+    const selectedDocs = relatedDocs.filter(d => selectedDocIds[d.id]).map(d => d.name);
+    const newTask: Task = {
+      id: `task-${Date.now()}`,
+      title: formTitle,
+      description: formDescription,
+      status: 'draft',
+      priority: formPriority || 'medium',
+      assignee: assigneeName,
+      assigneeRole: assigneeRole || 'Исполнитель',
+      creator: currentUser.name,
+      creatorRole: 'Создатель',
+      projectName,
+      projectId: selectedProjectId,
+      relatedDocuments: selectedDocs,
+      dueDate: formDueDate,
+      createdDate: new Date().toISOString().slice(0, 10),
+      comments: 0,
+      attachments: 0,
+      progress: 0,
+      commentsList: [],
+      history: [
+        { author: currentUser.name, date: new Date().toISOString().slice(0,10), decision: 'создано' }
+      ]
+    } as Task;
+    setTasks(prev => [newTask, ...prev]);
     setIsCreateDialogOpen(false);
+    // reset form
+    setFormTitle('');
+    setFormDescription('');
+    setFormAssignee(undefined);
+    setFormDueDate('');
+    setFormPriority(undefined);
+    setSelectedProjectId(undefined);
+    setRelatedDocs([]);
+    setSelectedDocIds({});
   };
 
   const stats = {
-    total: mockTasks.length,
-    myTasks: mockTasks.filter(t => t.assignee === currentUser.name).length,
-    inProgress: mockTasks.filter(t => t.status === 'in-progress').length,
-    overdue: mockTasks.filter(t => t.status === 'overdue').length,
-    completed: mockTasks.filter(t => t.status === 'completed').length,
-    underReview: mockTasks.filter(t => t.status === 'under-review').length
+    total: tasks.length,
+    myTasks: tasks.filter(t => t.assignee === currentUser.name && t.status !== 'draft').length,
+    inProgress: tasks.filter(t => t.status === 'in-progress').length,
+    completed: tasks.filter(t => t.status === 'completed').length
+  };
+
+  const sendToWork = (taskId: string) => {
+    setTasks(prev => prev.map(t => {
+      if (t.id !== taskId) return t;
+      const nextHistory = (t.history || []).concat({ author: currentUser.name, date: new Date().toISOString().slice(0,10), decision: 'отправлено в работу' });
+      return { ...t, status: 'in-progress', history: nextHistory };
+    }));
+  };
+
+  const markCompleted = (taskId: string) => {
+    setTasks(prev => prev.map(t => {
+      if (t.id !== taskId) return t;
+      const nextHistory = (t.history || []).concat({ author: currentUser.name, date: new Date().toISOString().slice(0,10), decision: 'вопрос решен' });
+      return { ...t, status: 'completed', completedDate: new Date().toISOString().slice(0,10), history: nextHistory };
+    }));
+  };
+
+  const markResolvedByAssignee = (taskId: string) => {
+    setTasks(prev => prev.map(t => {
+      if (t.id !== taskId) return t;
+      const nextHistory = (t.history || []).concat({ author: currentUser.name, date: new Date().toISOString().slice(0,10), decision: 'зафиксировано решение' });
+      return { ...t, history: nextHistory };
+    }));
+  };
+
+  const sendBackForRework = (taskId: string) => {
+    setTasks(prev => prev.map(t => {
+      if (t.id !== taskId) return t;
+      const nextHistory = (t.history || []).concat({ author: currentUser.name, date: new Date().toISOString().slice(0,10), decision: 'отправлено на доработку' });
+      return { ...t, history: nextHistory };
+    }));
   };
 
   const isOverdue = (dueDate: string) => {
@@ -253,48 +439,50 @@ export default function Tasks() {
                 <div className="space-y-4">
                   <div>
                     <Label htmlFor="taskTitle">Заголовок поручения *</Label>
-                    <Input id="taskTitle" placeholder="Краткое описание задачи..." />
+                    <Input id="taskTitle" placeholder="Краткое описание задачи..." value={formTitle} onChange={(e) => setFormTitle(e.target.value)} />
                   </div>
                   <div>
                     <Label htmlFor="taskDescription">Описание *</Label>
-                    <Textarea id="taskDescription" placeholder="Подробное описание поручения..." rows={3} />
+                    <Textarea id="taskDescription" placeholder="Подробное описание поручения..." rows={3} value={formDescription} onChange={(e) => setFormDescription(e.target.value)} />
                   </div>
                   <div className="grid grid-cols-2 gap-4">
                     <div>
-                      <Label htmlFor="assignee">Исполнитель *</Label>
-                      <Select>
+                      <Label htmlFor="project">Объект *</Label>
+                      <Select value={selectedProjectId} onValueChange={setSelectedProjectId}>
                         <SelectTrigger>
-                          <SelectValue placeholder="Выберите исполнителя" />
+                          <SelectValue placeholder="Выберите объект" />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="petrov">Петр Иванов</SelectItem>
-                          <SelectItem value="sidorova">Анна Сидорова</SelectItem>
-                          <SelectItem value="kozlov">Михаил Козлов</SelectItem>
+                          {availableProjects.map(p => (
+                            <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
+                          ))}
                         </SelectContent>
                       </Select>
                     </div>
                     <div>
                       <Label htmlFor="dueDate">Срок выполнения *</Label>
-                      <Input id="dueDate" type="date" />
+                      <Input id="dueDate" type="date" value={formDueDate} onChange={(e) => setFormDueDate(e.target.value)} />
                     </div>
                   </div>
                   <div className="grid grid-cols-2 gap-4">
                     <div>
-                      <Label htmlFor="project">Объект *</Label>
-                      <Select>
+                      <Label htmlFor="assignee">Исполнитель *</Label>
+                      <Select value={formAssignee} onValueChange={setFormAssignee} disabled={!selectedProjectId}>
                         <SelectTrigger>
-                          <SelectValue placeholder="Выберите объект" />
+                          <SelectValue placeholder="Выберите исполнителя" />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="project-1">ЖК «Северный парк»</SelectItem>
-                          <SelectItem value="project-2">БЦ «Технологический»</SelectItem>
-                          <SelectItem value="project-3">ТРК «Галерея»</SelectItem>
+                          {assignees.map(a => (
+                            <SelectItem key={a.id} value={a.id}>
+                              {a.name} {a.isRpp ? '(РПП)' : ''}
+                            </SelectItem>
+                          ))}
                         </SelectContent>
                       </Select>
                     </div>
                     <div>
                       <Label htmlFor="priority">Приоритет</Label>
-                      <Select>
+                      <Select value={formPriority} onValueChange={(v) => setFormPriority(v as 'low' | 'medium' | 'high')}>
                         <SelectTrigger>
                           <SelectValue placeholder="Выберите приоритет" />
                         </SelectTrigger>
@@ -308,16 +496,26 @@ export default function Tasks() {
                   </div>
                   <div>
                     <Label htmlFor="documents">Связанные документы</Label>
-                    <Select>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Выберите документы (необязательно)" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="doc-1">Архитектурные решения - Планы этажей</SelectItem>
-                        <SelectItem value="doc-2">Конструктивные решения - Фундамент</SelectItem>
-                        <SelectItem value="doc-3">Система отопления - Схемы</SelectItem>
-                      </SelectContent>
-                    </Select>
+                    <div className="border rounded-md p-3 max-h-56 overflow-y-auto">
+                      {selectedProjectId ? (
+                        relatedDocs.length > 0 ? (
+                          relatedDocs.map(doc => (
+                            <label key={doc.id} className="flex items-center space-x-2 py-1">
+                              <input
+                                type="checkbox"
+                                checked={!!selectedDocIds[doc.id]}
+                                onChange={(e) => setSelectedDocIds(prev => ({ ...prev, [doc.id]: e.target.checked }))}
+                              />
+                              <span className="text-sm">{doc.name}</span>
+                            </label>
+                          ))
+                        ) : (
+                          <div className="text-xs text-gray-500">Документы не найдены</div>
+                        )
+                      ) : (
+                        <div className="text-xs text-gray-500">Сначала выберите объект</div>
+                      )}
+                    </div>
                   </div>
                   <div className="flex justify-end space-x-2">
                     <Button variant="outline" onClick={() => setIsCreateDialogOpen(false)}>
@@ -355,18 +553,6 @@ export default function Tasks() {
           </Card>
           <Card>
             <CardContent className="p-6">
-              <div className="text-2xl font-bold text-yellow-600">{stats.underReview}</div>
-              <div className="text-sm text-gray-600">На проверке</div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="p-6">
-              <div className="text-2xl font-bold text-red-600">{stats.overdue}</div>
-              <div className="text-sm text-gray-600">Просроченных</div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="p-6">
               <div className="text-2xl font-bold text-green-600">{stats.completed}</div>
               <div className="text-sm text-gray-600">Завершенных</div>
             </CardContent>
@@ -379,8 +565,6 @@ export default function Tasks() {
             <TabsTrigger value="all-tasks">Все поручения</TabsTrigger>
             <TabsTrigger value="my-tasks">Мои задачи ({stats.myTasks})</TabsTrigger>
             <TabsTrigger value="created-by-me">Созданные мной</TabsTrigger>
-            <TabsTrigger value="overdue">Просроченные ({stats.overdue})</TabsTrigger>
-            <TabsTrigger value="under-review">На проверке ({stats.underReview})</TabsTrigger>
           </TabsList>
 
           <TabsContent value={activeTab} className="mt-6">
@@ -546,45 +730,36 @@ export default function Tasks() {
                             </div>
                           </div>
 
-                          {/* Progress Bar */}
-                          {task.progress !== undefined && task.status !== 'completed' && (
-                            <div className="mb-4">
-                              <div className="flex justify-between text-sm mb-1">
-                                <span className="text-gray-600">Прогресс выполнения</span>
-                                <span className="font-medium">{task.progress}%</span>
-                              </div>
-                              <div className="w-full bg-gray-200 rounded-full h-2">
-                                <div 
-                                  className="bg-blue-500 h-2 rounded-full transition-all" 
-                                  style={{width: `${task.progress}%`}}
-                                ></div>
-                              </div>
-                            </div>
-                          )}
+                          
                         </div>
 
                         {/* Actions */}
                         <div className="flex flex-col space-y-2 ml-6">
                           <Button variant="outline" size="sm">
                             <Eye className="w-4 h-4 mr-2" />
-                            Открыть
+                            <Link to={`/tasks/${task.id}`} state={{ task }} className="inline-flex items-center">Открыть</Link>
                           </Button>
-                          {(task.assignee === currentUser.name || task.creator === currentUser.name) && (
-                            <Button variant="outline" size="sm">
-                              <Edit className="w-4 h-4 mr-2" />
-                              Редактировать
+                          {/* Убрали кнопку Редактировать по требованию */}
+                          {task.status === 'draft' && task.creator === currentUser.name && (
+                            <Button size="sm" className="bg-yellow-600 hover:bg-yellow-700 text-white" onClick={() => sendToWork(task.id)}>
+                              <ArrowRight className="w-4 h-4 mr-2" />
+                              Отправить в работу
                             </Button>
+                          )}
+                          {task.status === 'in-progress' && task.creator === currentUser.name && (
+                            <>
+                              <Button size="sm" className="bg-green-600 hover:bg-green-700" onClick={() => markCompleted(task.id)}>
+                                <CheckCircle className="w-4 h-4 mr-2" />
+                                Завершить
+                              </Button>
+                              <Button size="sm" variant="outline" onClick={() => sendBackForRework(task.id)}>
+                                Отправить на доработку
+                              </Button>
+                            </>
                           )}
                           {task.status === 'in-progress' && task.assignee === currentUser.name && (
-                            <Button size="sm" className="bg-green-600 hover:bg-green-700">
-                              <CheckCircle className="w-4 h-4 mr-2" />
-                              На проверку
-                            </Button>
-                          )}
-                          {task.status === 'under-review' && task.creator === currentUser.name && (
-                            <Button size="sm">
-                              <CheckCircle className="w-4 h-4 mr-2" />
-                              Принять
+                            <Button size="sm" className="bg-blue-600 hover:bg-blue-700 text-white" onClick={() => markResolvedByAssignee(task.id)}>
+                              Отправить на проверку
                             </Button>
                           )}
                         </div>
