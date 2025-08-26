@@ -1,7 +1,7 @@
 import { useRole, defaultUsers, UserRole } from '../contexts/RoleContext';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Button } from '@/components/ui/button';
-import { Bell, Settings, FileText, Building2, Users, List, BarChart } from 'lucide-react';
+import { Bell, FileText, Building2, Users, List, BarChart } from 'lucide-react';
 import { Link, useLocation } from 'react-router-dom';
 
 const roleLabels: Record<UserRole, string> = {
@@ -18,8 +18,7 @@ const navigationConfig: Record<UserRole, Array<{ label: string; href: string; ic
     { label: 'Объекты', href: '/objects', icon: Building2 },
     { label: 'Организации', href: '/organizations', icon: Users },
     { label: 'Договоры', href: '/contracts', icon: FileText },
-    { label: 'Мониторинг', href: '/monitoring', icon: BarChart },
-    { label: 'Настройки', href: '/settings', icon: Settings }
+    { label: 'Мониторинг', href: '/monitoring', icon: BarChart }
   ],
   'company-admin': [
     { label: 'Объекты', href: '/objects', icon: Building2 },
