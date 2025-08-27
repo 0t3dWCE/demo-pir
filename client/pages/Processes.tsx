@@ -894,8 +894,8 @@ export default function Processes() {
                           </Button>
                         </div>
                       </div>
-                    </CardContent>
-                  </Card>
+              </CardContent>
+            </Card>
                 );
               })}
               {filteredProcesses.filter(p => p.isTemplate).length === 0 && (
@@ -1086,9 +1086,9 @@ export default function Processes() {
                                       </div>
                                     </div>
                                     <div className="flex items-center space-x-2">
-                                      <Badge variant={participant.isRequired ? 'default' : 'secondary'} className="text-xs">
-                                        {participant.isRequired ? 'Обязательный' : 'Опциональный'}
-                                      </Badge>
+                                    <Badge variant={participant.isRequired ? 'default' : 'secondary'} className="text-xs">
+                                      {participant.isRequired ? 'Обязательный' : 'Опциональный'}
+                                    </Badge>
                                       <Button variant="ghost" size="sm" onClick={() => {
                                         const steps = processStepsMap[selectedProcess.id] || [];
                                         const updated = steps.map((s, i) => i === index ? { ...s, participants: s.participants.filter(p => p.id !== participant.id) } : s);
@@ -1156,7 +1156,7 @@ export default function Processes() {
                                           : rule.enabled)
                                     : rule.enabled;
                                   return (
-                                    <div key={rule.id} className="flex items-center space-x-2">
+                                  <div key={rule.id} className="flex items-center space-x-2">
                                       <Checkbox
                                         checked={currentChecked}
                                         disabled={!isEditing}
@@ -1173,7 +1173,7 @@ export default function Processes() {
                                         }}
                                       />
                                       <span className="text-sm">{rule.type === 'can_finish' ? 'Возможность проставить статус согласования' : rule.description}</span>
-                                    </div>
+                                  </div>
                                   );
                                 })}
                                 
@@ -1196,13 +1196,13 @@ export default function Processes() {
                                     ) : (
                                       <>
                                         <Button variant="outline" size="sm" onClick={() => startEditStep(selectedProcess.id, index)}>
-                                          <Edit className="w-4 h-4 mr-2" />
-                                          Редактировать
-                                        </Button>
+                                      <Edit className="w-4 h-4 mr-2" />
+                                      Редактировать
+                                    </Button>
                                         <Button variant="outline" size="sm" onClick={() => duplicateSavedStep(selectedProcess.id, index)}>
-                                          <Copy className="w-4 h-4 mr-2" />
-                                          Дублировать
-                                        </Button>
+                                      <Copy className="w-4 h-4 mr-2" />
+                                      Дублировать
+                                    </Button>
                                         <Button variant="outline" size="sm" onClick={() => deleteSavedStep(selectedProcess.id, index)}>
                                           <Trash2 className="w-4 h-4 mr-2" />
                                           Удалить шаг

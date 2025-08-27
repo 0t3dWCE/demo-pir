@@ -87,7 +87,7 @@ export default function Header() {
               <SelectValue />
             </SelectTrigger>
             <SelectContent className="w-96">
-              {Object.entries(roleLabels).map(([role, label]) => {
+              {Object.entries(roleLabels).filter(([role]) => role !== 'project-manager').map(([role, label]) => {
                 const user = defaultUsers[role as UserRole];
                 const value = buildValue(user);
                 return (
