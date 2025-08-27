@@ -551,3 +551,79 @@ export async function getProjectAssignees(projectId: string): Promise<AssigneeIn
     { id: `${projectId}-eng-b`, name: 'Инженер Б', role: 'Инженер' }
   ];
 }
+
+// ------------------ Документы и согласование (центральное хранилище) ------------------
+
+export type DocumentStatus = 'draft' | 'on-approval' | 'approved' | 'rejected';
+
+export interface DocRecord {
+  id: string;
+  projectId: string;
+  name: string;
+  description?: string;
+  type: string;
+  size: string;
+  version: string;
+  author: string;
+  uploadDate: string;
+  status: DocumentStatus;
+  processInfo?: { processName: string; currentStep: number; totalSteps: number };
+}
+
+const DOC_STORE: Record<string, DocRecord> = {
+  'doc-1': { id: 'doc-1', projectId: '1', name: 'Архитектурные решения - Планы этажей', description: 'Архитектурные планы этажей жилого комплекса', type: 'PDF', size: '2.4 МБ', version: '1.2', author: 'Петр Иванов', uploadDate: '2024-01-15', status: 'on-approval', processInfo: { processName: 'Согласование для ЖК Северный парк', currentStep: 2, totalSteps: 3 } },
+  'doc-2': { id: 'doc-2', projectId: '2', name: 'Конструктивные решения - Фундамент', type: 'DWG', size: '5.1 МБ', version: '2.0', author: 'Анна Сидорова', uploadDate: '2024-01-12', status: 'on-approval', processInfo: { processName: 'Процесс согласования ИРД', currentStep: 1, totalSteps: 2 } },
+  'doc-3': { id: 'doc-3', projectId: '1', name: 'Система отопления - Схемы', type: 'PDF', size: '1.8 МБ', version: '1.0', author: 'Михаил Козлов', uploadDate: '2024-01-18', status: 'draft' }
+};
+
+export async function getDocument(docId: string): Promise<DocRecord | undefined> {
+  await new Promise((r) => setTimeout(r, 80));
+  return DOC_STORE[docId];
+}
+
+export async function listDocuments(): Promise<DocRecord[]> {
+  await new Promise((r) => setTimeout(r, 80));
+  return Object.values(DOC_STORE);
+}
+
+export async function listProjectDocumentsFull(projectId: string): Promise<DocRecord[]> {
+  await new Promise((r) => setTimeout(r, 80));
+  return Object.values(DOC_STORE).filter(d => d.projectId === projectId);
+}
+
+export async function startApproval(docIds: string[], process: { name: string; steps: number }) {
+  await new Promise((r) => setTimeout(r, 50));
+  docIds.forEach(id => {
+    const d = DOC_STORE[id];
+    if (!d) return;
+    d.status = 'on-approval';
+    d.processInfo = { processName: process.name, currentStep: 1, totalSteps: process.steps };
+  });
+}
+
+export async function approveOrAdvance(docId: string): Promise<'approved' | 'advanced'> {
+  await new Promise((r) => setTimeout(r, 50));
+  const d = DOC_STORE[docId];
+  if (!d || !d.processInfo) return 'advanced';
+  const { currentStep, totalSteps } = d.processInfo;
+  if (currentStep >= totalSteps) {
+    d.status = 'approved';
+    delete d.processInfo;
+    return 'approved';
+  }
+  d.processInfo.currentStep += 1;
+  return 'advanced';
+}
+
+// ------------------ Уведомления (простая очередь) ------------------
+
+export interface NotificationItem {
+  id: string;
+  text: string;
+  link?: string;
+}
+
+const NOTIFICATIONS: NotificationItem[] = [];
+
+export function pushNotification(n: NotificationItem) { NOTIFICATIONS.unshift(n); }
+export function listNotifications(): NotificationItem[] { return NOTIFICATIONS; }

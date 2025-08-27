@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import Layout from '../components/Layout';
 import { Button } from '@/components/ui/button';
@@ -16,51 +16,22 @@ import {
   MessageSquare,
   User
 } from 'lucide-react';
+import { listDocuments } from '../../shared/api';
 
-const mockApprovalDocuments = [
-  {
-    id: '1',
-    name: 'Архитектурные решения - Планы этажей',
-    project: 'ЖК «Северный парк»',
-    type: 'PDF',
-    size: '2.4 МБ',
-    author: 'Петр Иванов',
-    submittedDate: '2024-01-15',
-    deadline: '2024-01-22',
-    priority: 'high',
-    status: 'pending',
-    comments: 3,
-    reviewers: ['Анна Смирнова', 'Михаил Козлов']
-  },
-  {
-    id: '2',
-    name: 'Конструктивные решения - Фундамент', 
-    project: 'БЦ «Технологический»',
-    type: 'DWG',
-    size: '5.1 МБ',
-    author: 'Анна Сидорова',
-    submittedDate: '2024-01-12',
-    deadline: '2024-01-19',
-    priority: 'medium',
-    status: 'reviewing',
-    comments: 1,
-    reviewers: ['Анна Смирнова']
-  },
-  {
-    id: '3',
-    name: 'Система отопления - Схемы',
-    project: 'ЖК «Северный парк»',
-    type: 'PDF', 
-    size: '1.8 МБ',
-    author: 'Михаил Козлов',
-    submittedDate: '2024-01-10',
-    deadline: '2024-01-17',
-    priority: 'low',
-    status: 'approved',
-    comments: 2,
-    reviewers: ['Анна Смирнова']
-  }
-];
+type ApprovalDoc = {
+  id: string;
+  name: string;
+  project: string;
+  type: string;
+  size: string;
+  author: string;
+  submittedDate: string;
+  deadline?: string;
+  priority: 'low' | 'medium' | 'high';
+  status: 'pending' | 'reviewing' | 'approved' | 'rejected';
+  comments: number;
+  reviewers: string[];
+};
 
 const statusConfig = {
   'pending': { label: 'Ожидает', color: 'bg-yellow-500', icon: Clock },
@@ -79,8 +50,30 @@ export default function Approval() {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [projectFilter, setProjectFilter] = useState('all');
+  const [approvalDocs, setApprovalDocs] = useState<ApprovalDoc[]>([]);
 
-  const filteredDocuments = mockApprovalDocuments.filter(doc => {
+  useEffect(() => {
+    // подгружаем документы из центрального стора и трансформируем
+    listDocuments().then((docs) => {
+      const mapped: ApprovalDoc[] = (docs as any[]).map((d) => ({
+        id: d.id,
+        name: d.name,
+        project: d.projectId || 'Объект',
+        type: d.type,
+        size: d.size,
+        author: d.author,
+        submittedDate: d.uploadDate,
+        deadline: '2025-12-31',
+        priority: 'medium',
+        status: d.status === 'approved' ? 'approved' : 'pending',
+        comments: 0,
+        reviewers: ['Согласующий']
+      }));
+      setApprovalDocs(mapped);
+    });
+  }, []);
+
+  const filteredDocuments = approvalDocs.filter(doc => {
     const matchesSearch = doc.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
                          doc.project.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesStatus = statusFilter === 'all' || doc.status === statusFilter;
@@ -89,10 +82,10 @@ export default function Approval() {
   });
 
   const stats = {
-    total: mockApprovalDocuments.length,
-    pending: mockApprovalDocuments.filter(d => d.status === 'pending').length,
-    reviewing: mockApprovalDocuments.filter(d => d.status === 'reviewing').length,
-    approved: mockApprovalDocuments.filter(d => d.status === 'approved').length
+    total: approvalDocs.length,
+    pending: approvalDocs.filter(d => d.status === 'pending').length,
+    reviewing: approvalDocs.filter(d => d.status === 'reviewing').length,
+    approved: approvalDocs.filter(d => d.status === 'approved').length
   };
 
   return (

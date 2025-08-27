@@ -11,7 +11,7 @@ import { Label } from '@/components/ui/label';
 import { useRole } from '../contexts/RoleContext';
 import { Link } from 'react-router-dom';
 import { Checkbox } from '@/components/ui/checkbox';
-import { listAccessibleProcessesForCompany } from '../../shared/api';
+import { listAccessibleProcessesForCompany, listDocuments, getProjectMeta } from '../../shared/api';
 import { 
   Search, 
   Plus, 
@@ -278,6 +278,8 @@ export default function Documents() {
 
   // Автопрогресс шагов (демо)
   useEffect(() => {
+    // загрузить документы из центрального стора
+    listDocuments().then((docs: any) => setDocuments(docs as any));
     const timer = setInterval(() => {
       setDocuments(prev => prev.map(d => (
         d.status === 'on-approval' && d.processInfo && d.processInfo.currentStep < d.processInfo.totalSteps
@@ -519,6 +521,7 @@ export default function Documents() {
             {filteredDocuments.map((doc) => {
               const statusInfo = statusConfig[doc.status];
               const StatusIcon = statusInfo.icon;
+              const projectName = (doc as any).project || (getProjectMeta((doc as any).projectId || '')?.name ?? (doc as any).projectId);
 
               return (
                 <Card key={doc.id} className="hover:shadow-lg transition-shadow">
@@ -533,8 +536,13 @@ export default function Documents() {
                             {statusInfo.label}
                           </Badge>
                           <Badge variant="outline">{doc.type}</Badge>
-                          {doc.status === 'on-approval' && doc.processInfo && (
+                          {doc.status === 'on-approval' && doc.processInfo && statusInfo.label !== 'Согласован' && (
                             <Badge variant="secondary">На согласовании по процессу — {doc.processInfo.processName}. Текущий шаг: {doc.processInfo.currentStep}</Badge>
+                          )}
+                          {projectName && (
+                            <span className="text-sm text-gray-600 flex items-center">
+                              <Building2 className="w-3 h-3 mr-1" /> {projectName}
+                            </span>
                           )}
                         </div>
 

@@ -9,7 +9,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { getProjectMeta, listAccessibleProcessesForCompany } from '../../shared/api';
+import { getProjectMeta, listAccessibleProcessesForCompany, listProjectDocumentsFull } from '../../shared/api';
 import {
   FileText,
   Upload,
@@ -142,6 +142,7 @@ export default function ProjectDetail() {
     if (!id) return;
     const meta = getProjectMeta(id);
     if (meta?.name) setProjectName(meta.name);
+    listProjectDocumentsFull(id).then(setFolderDocuments);
   }, [id]);
 
   useEffect(() => {
@@ -373,7 +374,7 @@ export default function ProjectDetail() {
                                 <StatusIcon className="w-3 h-3 mr-1" />
                                 {statusInfo.label}
                               </Badge>
-                              {doc.status === 'on-approval' && (doc as any).processInfo && (
+                              {(doc as any).processInfo && statusInfo.label !== 'Согласован' && (
                                 <Badge variant="secondary">На согласовании по процессу — {(doc as any).processInfo.processName}. Текущий шаг: {(doc as any).processInfo.currentStep}</Badge>
                               )}
                               {doc.comments > 0 && (
