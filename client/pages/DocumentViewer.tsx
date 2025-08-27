@@ -20,7 +20,8 @@ import {
   CalendarDays,
   FileType
 } from 'lucide-react';
-import { getDocument, approveOrAdvance, pushNotification } from '../../shared/api';
+import { getDocument, approveOrAdvance, pushNotification, listDocumentVersions, addDocumentVersion } from '../../shared/api';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 // документ будет загружаться из API по id
 
@@ -89,6 +90,7 @@ export default function DocumentViewer() {
   const [comments, setComments] = useState<any[]>(mockComments);
   const [hideResolved, setHideResolved] = useState(false);
   const navigate = useNavigate();
+  const [versions, setVersions] = useState<any[]>([]);
 
   const handleAddComment = () => {
     if (newComment.trim()) {
@@ -132,6 +134,7 @@ export default function DocumentViewer() {
   useEffect(() => {
     const resolvedId = id && id.startsWith('doc-') ? id : `doc-${id}`;
     getDocument(resolvedId || 'doc-1').then(setDoc);
+    listDocumentVersions(resolvedId || 'doc-1').then(setVersions);
   }, [id]);
 
   return (
@@ -198,7 +201,7 @@ export default function DocumentViewer() {
             <Card>
               <CardHeader>
                 <div className="flex items-center justify-between">
-                  <CardTitle>Просмотр документа</CardTitle>
+                  <CardTitle>Документ</CardTitle>
                   <div className="flex items-center space-x-2">
                     <Button variant="outline" size="sm" onClick={() => setZoom(Math.max(50, zoom - 10))}>
                       <ZoomOut className="w-4 h-4" />
@@ -211,34 +214,75 @@ export default function DocumentViewer() {
                 </div>
               </CardHeader>
               <CardContent>
-                <div className="relative bg-gray-100 rounded-lg" style={{ height: '600px' }}>
-                  {/* Placeholder for PDF viewer */}
-                  <div className="absolute inset-0 flex items-center justify-center">
-                    <div className="text-center">
-                      <FileText className="w-16 h-16 mx-auto mb-4 text-gray-300" />
-                      <p className="text-gray-500">PDF Document Viewer</p>
-                      <p className="text-sm text-gray-400 mt-2">
-                        В реальном приложении здесь будет отображаться PDF документ
-                      </p>
+                <Tabs defaultValue="preview">
+                  <TabsList>
+                    <TabsTrigger value="preview">Предпросмотр</TabsTrigger>
+                    <TabsTrigger value="versions">Версии</TabsTrigger>
+                  </TabsList>
+                  <TabsContent value="preview">
+                    <div className="relative bg-gray-100 rounded-lg" style={{ height: '600px' }}>
+                      {/* Placeholder for PDF viewer */}
+                      <div className="absolute inset-0 flex items-center justify-center">
+                        <div className="text-center">
+                          <FileText className="w-16 h-16 mx-auto mb-4 text-gray-300" />
+                          <p className="text-gray-500">PDF Document Viewer</p>
+                          <p className="text-sm text-gray-400 mt-2">
+                            В реальном приложении здесь будет отображаться PDF документ
+                          </p>
+                        </div>
+                      </div>
+                      {/* Comment markers */}
+                      {comments.map((comment) => (
+                        <div
+                          key={comment.id}
+                          className="absolute w-6 h-6 bg-red-500 rounded-full cursor-pointer flex items-center justify-center shadow-lg hover:bg-red-600 transition-colors"
+                          style={{ 
+                            left: `${comment.position.x}px`, 
+                            top: `${comment.position.y}px`,
+                            transform: `scale(${zoom / 100})`
+                          }}
+                          onClick={() => setSelectedComment(comment)}
+                        >
+                          <MessageSquare className="w-3 h-3 text-white" />
+                        </div>
+                      ))}
                     </div>
-                  </div>
-                  
-                  {/* Comment markers */}
-                  {comments.map((comment) => (
-                    <div
-                      key={comment.id}
-                      className="absolute w-6 h-6 bg-red-500 rounded-full cursor-pointer flex items-center justify-center shadow-lg hover:bg-red-600 transition-colors"
-                      style={{ 
-                        left: `${comment.position.x}px`, 
-                        top: `${comment.position.y}px`,
-                        transform: `scale(${zoom / 100})`
-                      }}
-                      onClick={() => setSelectedComment(comment)}
-                    >
-                      <MessageSquare className="w-3 h-3 text-white" />
+                  </TabsContent>
+                  <TabsContent value="versions">
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="text-sm text-gray-600">Всего версий: {versions.length}</div>
+                      <div>
+                        <input type="file" id="verUpload" className="hidden" onChange={async (e) => {
+                          const file = e.target.files?.[0];
+                          if (!file || !id) return;
+                          const resolvedId = id.startsWith('doc-') ? id : `doc-${id}`;
+                          await addDocumentVersion(resolvedId, { name: file.name, size: `${(file.size/1024/1024).toFixed(1)} МБ`, type: file.type || 'PDF', uploadedBy: doc?.author || 'Пользователь' });
+                          const next = await listDocumentVersions(resolvedId);
+                          setVersions(next);
+                          const updated = await getDocument(resolvedId);
+                          setDoc(updated);
+                        }} />
+                        <Button variant="outline" size="sm" onClick={() => document.getElementById('verUpload')?.click()}>Загрузить новую версию</Button>
+                      </div>
                     </div>
-                  ))}
-                </div>
+                    <div className="border rounded">
+                      <div className="grid grid-cols-5 gap-2 px-3 py-2 text-xs text-gray-500 border-b"> 
+                        <div>Версия</div><div>Загружен</div><div>Размер</div><div>Формат</div><div></div>
+                      </div>
+                      {versions.map((v) => (
+                        <div key={v.version} className="grid grid-cols-5 gap-2 px-3 py-2 items-center border-b">
+                          <div className="font-medium">{v.version}</div>
+                          <div className="text-sm text-gray-600">{v.uploadedAt}</div>
+                          <div className="text-sm text-gray-600">{v.size}</div>
+                          <div className="text-sm text-gray-600">{v.type || 'PDF'}</div>
+                          <div className="text-right">
+                            <Button variant="outline" size="sm">Скачать</Button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </TabsContent>
+                </Tabs>
               </CardContent>
             </Card>
           </div>

@@ -627,3 +627,48 @@ const NOTIFICATIONS: NotificationItem[] = [];
 
 export function pushNotification(n: NotificationItem) { NOTIFICATIONS.unshift(n); }
 export function listNotifications(): NotificationItem[] { return NOTIFICATIONS; }
+
+// ------------------ Версии документов (мок) ------------------
+
+export interface DocumentVersion {
+  version: string; // v1.0, v1.1, ...
+  uploadedAt: string;
+  size: string;
+  type: string;
+  uploadedBy: string;
+  fileUrl: string;
+}
+
+const DOC_VERSIONS: Record<string, DocumentVersion[]> = {
+  'doc-1': [
+    { version: 'v1.2', uploadedAt: '2024-01-20 10:15', size: '2.4 МБ', type: 'PDF', uploadedBy: 'Петр Иванов', fileUrl: '#' },
+    { version: 'v1.1', uploadedAt: '2024-01-18 09:00', size: '2.3 МБ', type: 'PDF', uploadedBy: 'Петр Иванов', fileUrl: '#' },
+    { version: 'v1.0', uploadedAt: '2024-01-15 12:00', size: '2.2 МБ', type: 'PDF', uploadedBy: 'Петр Иванов', fileUrl: '#' }
+  ],
+  'doc-2': [
+    { version: 'v1.6', uploadedAt: '2024-01-20 10:15', size: '2.4 МБ', type: 'PDF', uploadedBy: 'Петр Иванов', fileUrl: '#' },
+    { version: 'v1.5', uploadedAt: '2024-01-20 10:15', size: '2.4 МБ', type: 'PDF', uploadedBy: 'Петр Иванов', fileUrl: '#' },
+    { version: 'v1.4', uploadedAt: '2024-01-20 10:15', size: '2.4 МБ', type: 'PDF', uploadedBy: 'Петр Иванов', fileUrl: '#' },
+    { version: 'v1.3', uploadedAt: '2024-01-20 10:15', size: '2.4 МБ', type: 'PDF', uploadedBy: 'Петр Иванов', fileUrl: '#' },
+    { version: 'v1.2', uploadedAt: '2024-01-20 10:15', size: '2.4 МБ', type: 'PDF', uploadedBy: 'Петр Иванов', fileUrl: '#' },
+    { version: 'v1.1', uploadedAt: '2024-01-18 09:00', size: '2.3 МБ', type: 'PDF', uploadedBy: 'Петр Иванов', fileUrl: '#' },
+    { version: 'v1.0', uploadedAt: '2024-01-15 12:00', size: '2.2 МБ', type: 'PDF', uploadedBy: 'Петр Иванов', fileUrl: '#' }
+  ]
+};
+
+export async function listDocumentVersions(docId: string): Promise<DocumentVersion[]> {
+  await new Promise((r) => setTimeout(r, 80));
+  return DOC_VERSIONS[docId] || [];
+}
+
+export async function addDocumentVersion(docId: string, file: { name: string; size: string; type: string; uploadedBy: string }): Promise<void> {
+  await new Promise((r) => setTimeout(r, 100));
+  const versions = DOC_VERSIONS[docId] || (DOC_VERSIONS[docId] = []);
+  const last = versions[0]?.version || 'v1.0';
+  const number = Number(last.replace(/v/, '')) + 0.1;
+  const next = `v${number.toFixed(1)}`;
+  versions.unshift({ version: next, uploadedAt: new Date().toISOString(), size: file.size, type: file.type, uploadedBy: file.uploadedBy, fileUrl: '#' });
+  // синхронно обновим и метаданные документа
+  const d = DOC_STORE[docId];
+  if (d) { d.version = next; d.size = file.size; d.type = file.type; }
+}
