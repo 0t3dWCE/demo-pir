@@ -58,6 +58,7 @@ interface Task {
   projectName: string;
   projectId: string;
   relatedDocuments: string[];
+  relatedDocumentsDetailed?: { projectId: string; projectName: string; documents: string[] }[];
   dueDate: string;
   createdDate: string;
   completedDate?: string;
@@ -262,6 +263,12 @@ export default function Tasks() {
   const [relatedDocs, setRelatedDocs] = useState<SimpleDocument[]>([]);
   const [selectedDocIds, setSelectedDocIds] = useState<Record<string, boolean>>({});
   const [assignees, setAssignees] = useState<AssigneeInfo[]>([]);
+  // Доп. блоки выбора документов из других объектов
+  const [extraSelections, setExtraSelections] = useState<Array<{
+    projectId?: string;
+    docs: SimpleDocument[];
+    selected: Record<string, boolean>;
+  }>>([]);
 
   useEffect(() => {
     setAvailableProjects(listProjects());
@@ -286,6 +293,21 @@ export default function Tasks() {
     loadDocs();
     loadAssignees();
   }, [selectedProjectId]);
+
+  const addExtraSelection = () => {
+    setExtraSelections(prev => [...prev, { projectId: undefined, docs: [], selected: {} }]);
+  };
+
+  const updateExtraProject = async (idx: number, projectId: string) => {
+    const docs = await getProjectDocuments(projectId);
+    const selected: Record<string, boolean> = {};
+    docs.forEach(d => selected[d.id] = false);
+    setExtraSelections(prev => prev.map((b, i) => i === idx ? { projectId, docs, selected } : b));
+  };
+
+  const toggleExtraDoc = (idx: number, docId: string, checked: boolean) => {
+    setExtraSelections(prev => prev.map((b, i) => i === idx ? { ...b, selected: { ...b.selected, [docId]: checked } } : b));
+  };
 
   const filteredTasks = tasks.filter(task => {
     const matchesSearch = task.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -330,7 +352,20 @@ export default function Tasks() {
     const projectName = availableProjects.find(p => p.id === selectedProjectId)?.name || '';
     const assigneeName = assignees.find(a => a.id === formAssignee)?.name || '';
     const assigneeRole = assignees.find(a => a.id === formAssignee)?.role || '';
-    const selectedDocs = relatedDocs.filter(d => selectedDocIds[d.id]).map(d => d.name);
+    const selectedDocsMain = relatedDocs.filter(d => selectedDocIds[d.id]);
+    const detailed: { projectId: string; projectName: string; documents: string[] }[] = [];
+    if (selectedDocsMain.length > 0 && selectedProjectId) {
+      detailed.push({ projectId: selectedProjectId, projectName, documents: selectedDocsMain.map(d => d.name) });
+    }
+    extraSelections.forEach(block => {
+      if (!block.projectId) return;
+      const docs = block.docs.filter(d => block.selected[d.id]).map(d => d.name);
+      if (docs.length > 0) {
+        const pname = availableProjects.find(p => p.id === block.projectId)?.name || '';
+        detailed.push({ projectId: block.projectId, projectName: pname, documents: docs });
+      }
+    });
+    const selectedDocs = detailed.flatMap(g => g.documents);
     const newTask: Task = {
       id: `task-${Date.now()}`,
       title: formTitle,
@@ -344,6 +379,7 @@ export default function Tasks() {
       projectName,
       projectId: selectedProjectId,
       relatedDocuments: selectedDocs,
+      relatedDocumentsDetailed: detailed,
       dueDate: formDueDate,
       createdDate: new Date().toISOString().slice(0, 10),
       comments: 0,
@@ -429,7 +465,7 @@ export default function Tasks() {
                   <span>Создать поручение</span>
                 </Button>
               </DialogTrigger>
-              <DialogContent className="max-w-2xl">
+              <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
                 <DialogHeader>
                   <DialogTitle className="flex items-center space-x-2">
                     <List className="w-5 h-5" />
@@ -514,6 +550,73 @@ export default function Tasks() {
                         )
                       ) : (
                         <div className="text-xs text-gray-500">Сначала выберите объект</div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Дополнительные источники документов */}
+                  {extraSelections.map((block, idx) => (
+                    <div key={idx} className="border rounded-md p-3 space-y-3">
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <Label>Доп. объект</Label>
+                          <Select value={block.projectId} onValueChange={(v) => updateExtraProject(idx, v)}>
+                            <SelectTrigger>
+                              <SelectValue placeholder="Выберите объект" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {availableProjects.map(p => (
+                                <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      </div>
+                      <div className="max-h-40 overflow-y-auto">
+                        {block.projectId ? (
+                          block.docs.length > 0 ? (
+                            block.docs.map(doc => (
+                              <label key={doc.id} className="flex items-center space-x-2 py-1">
+                                <input type="checkbox" checked={!!block.selected[doc.id]} onChange={(e) => toggleExtraDoc(idx, doc.id, e.target.checked)} />
+                                <span className="text-sm">{doc.name}</span>
+                              </label>
+                            ))
+                          ) : (
+                            <div className="text-xs text-gray-500">Документы не найдены</div>
+                          )
+                        ) : (
+                          <div className="text-xs text-gray-500">Сначала выберите объект</div>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+
+                  <Button variant="outline" size="sm" onClick={addExtraSelection}>Добавить файлы из другого Объекта</Button>
+
+                  {/* Итоговый список выбранных файлов */}
+                  <div className="pt-2">
+                    <div className="text-sm font-medium text-gray-700 mb-1">Выбрано документов:</div>
+                    <div className="text-xs text-gray-700 space-y-1">
+                      {selectedProjectId && Object.values(selectedDocIds).some(Boolean) && (
+                        <div>
+                          <div className="font-medium">{availableProjects.find(p => p.id === selectedProjectId)?.name}</div>
+                          {relatedDocs.filter(d => selectedDocIds[d.id]).map(d => (
+                            <div key={d.id}>- {d.name}</div>
+                          ))}
+                        </div>
+                      )}
+                      {extraSelections.map((block, idx) => (
+                        block.projectId && Object.values(block.selected).some(Boolean) ? (
+                          <div key={`sum-${idx}`}>
+                            <div className="font-medium">{availableProjects.find(p => p.id === block.projectId)?.name}</div>
+                            {block.docs.filter(d => block.selected[d.id]).map(d => (
+                              <div key={d.id}>- {d.name}</div>
+                            ))}
+                          </div>
+                        ) : null
+                      ))}
+                      {!(selectedProjectId && Object.values(selectedDocIds).some(Boolean)) && extraSelections.every(b => !b.projectId || !Object.values(b.selected).some(Boolean)) && (
+                        <div className="text-gray-500">Пока ничего не выбрано</div>
                       )}
                     </div>
                   </div>

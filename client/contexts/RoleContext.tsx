@@ -61,6 +61,12 @@ const defaultUsers: Record<UserRole, User> = {
   }
 };
 
+// Дополнительные пользователи для выбора в ролю селекторе (демо)
+export const extraUsers: Array<User & { key: string; label: string; roleKey: UserRole }> = [
+  { key: 'designer-2', roleKey: 'designer', name: 'Игорь Соколов', role: 'designer', email: 'i.sokolov@alpha-pro.ru', company: 'АльфаПроект' },
+  { key: 'reviewer-2', roleKey: 'reviewer', name: 'Евгений Кузнецов', role: 'reviewer', email: 'e.kuznetsov@alpha-pro.ru', company: 'АльфаПроект' }
+];
+
 export function RoleProvider({ children }: { children: ReactNode }) {
   const [currentUser, setCurrentUser] = useState<User>(defaultUsers['customer']);
 

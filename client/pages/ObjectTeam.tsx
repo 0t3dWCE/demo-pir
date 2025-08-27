@@ -10,7 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { getProjectCompanies, getProjectMeta, getEmployeesForCompanies, getObjectFolderPaths, getProjectEmployees, setProjectEmployees } from '../../shared/api';
 import { Users, ArrowLeft, Building2, Search } from 'lucide-react';
 
-type RoleKey = 'signatory' | 'reviewer' | 'observer';
+type RoleKey = 'signatory' | 'reviewer' | 'observer' | 'editor' | 'deleter';
 
 export default function ObjectTeam() {
   const { id } = useParams();
@@ -189,7 +189,7 @@ export default function ObjectTeam() {
                       <div>
                         <div className="text-sm font-medium text-gray-500 mb-2">Роли</div>
                         <div className="space-y-3">
-                          {(['signatory', 'reviewer', 'observer'] as RoleKey[]).map((role) => {
+                          {(['signatory', 'reviewer', 'observer', 'editor', 'deleter'] as RoleKey[]).map((role) => {
                             const key = `${emp.id}:${role}`;
                             const enabled = Boolean(roleAssignments[emp.id]?.roleFolders?.[role]);
                             const label = getRoleFoldersLabel(emp.id, role);
@@ -201,7 +201,7 @@ export default function ObjectTeam() {
                                     onCheckedChange={(val) => toggleRole(emp.id, role, Boolean(val))}
                                   />
                                   <span className="text-sm capitalize">
-                                    {role === 'signatory' ? 'подписант' : role === 'reviewer' ? 'проверяющий' : 'наблюдающий'}
+                                    {role === 'signatory' ? 'подписант' : role === 'reviewer' ? 'проверяющий' : role === 'observer' ? 'наблюдающий' : role === 'editor' ? 'редактирование/изменение' : 'удаление'}
                                   </span>
                                   {enabled && (
                                     <span className="text-xs text-gray-500">({label})</span>

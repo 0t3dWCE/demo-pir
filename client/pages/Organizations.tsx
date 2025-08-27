@@ -310,33 +310,7 @@ export default function Organizations() {
           </Dialog>
         </div>
 
-        {/* Statistics */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-          <Card>
-            <CardContent className="p-6">
-              <div className="text-2xl font-bold text-blue-600">{stats.total}</div>
-              <div className="text-sm text-gray-600">Всего организаций</div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="p-6">
-              <div className="text-2xl font-bold text-green-600">{stats.active}</div>
-              <div className="text-sm text-gray-600">Активных</div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="p-6">
-              <div className="text-2xl font-bold text-yellow-600">{stats.pending}</div>
-              <div className="text-sm text-gray-600">На рассмотрении</div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="p-6">
-              <div className="text-2xl font-bold text-purple-600">{stats.totalEmployees}</div>
-              <div className="text-sm text-gray-600">Всего сотрудников</div>
-            </CardContent>
-          </Card>
-        </div>
+        
 
         {/* Main Content */}
         <Tabs value={activeTab} onValueChange={setActiveTab}>

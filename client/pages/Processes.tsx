@@ -10,6 +10,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Checkbox } from '@/components/ui/checkbox';
+import { getProjectCompanies, getProjectEmployees, getEmployeesForCompanies, listProjects } from '../../shared/api';
 import { useRole } from '../contexts/RoleContext';
 import { Link } from 'react-router-dom';
 import { 
@@ -79,6 +80,18 @@ interface StepRule {
   enabled: boolean;
   description: string;
 }
+
+type NewStepForm = {
+  tempId: string;
+  name: string;
+  timeLimit: number;
+  isRequired: boolean;
+  canFinishOnThis: boolean;
+  canSkip: boolean;
+  autoReject: boolean;
+  participants: Participant[];
+  requireAllParticipants: boolean;
+};
 
 const mockProcesses: Process[] = [
   {
@@ -214,8 +227,48 @@ export default function Processes() {
   const [isStepDialogOpen, setIsStepDialogOpen] = useState(false);
   const [selectedProcess, setSelectedProcess] = useState<Process | null>(null);
   const [activeTab, setActiveTab] = useState('list');
+  const [processes, setProcesses] = useState<Process[]>(mockProcesses);
+  const [isDuplicateDialogOpen, setIsDuplicateDialogOpen] = useState(false);
+  const [processToDuplicate, setProcessToDuplicate] = useState<Process | null>(null);
+  const [duplicateName, setDuplicateName] = useState('');
+  const [creationOption, setCreationOption] = useState<'new' | 'template' | 'copy'>('new');
+  const [selectedTemplateId, setSelectedTemplateId] = useState<string | undefined>(undefined);
+  const [selectedCopyId, setSelectedCopyId] = useState<string | undefined>(undefined);
+  const [createType, setCreateType] = useState<'approval' | 'review' | 'custom' | ''>('');
+  const [createStepsCount, setCreateStepsCount] = useState<number>(2);
+  const [createName, setCreateName] = useState<string>('');
+  const [createDescription, setCreateDescription] = useState<string>('');
+  const [createProject, setCreateProject] = useState<string | undefined>(undefined);
 
-  const filteredProcesses = mockProcesses.filter(process => {
+  const initialStepsMap: Record<string, ProcessStep[]> = {
+    'proc-1': mockSteps,
+    'proc-2': mockSteps.slice(0, 1),
+    'proc-3': mockSteps,
+    'proc-4': mockSteps.slice(0, 2),
+    'proc-5': []
+  };
+  const [processStepsMap, setProcessStepsMap] = useState<Record<string, ProcessStep[]>>(initialStepsMap);
+  const [processInitialCreateForms, setProcessInitialCreateForms] = useState<Record<string, number>>({});
+  const [draftStepsMap, setDraftStepsMap] = useState<Record<string, NewStepForm[]>>({});
+  const [assigneePickerOpen, setAssigneePickerOpen] = useState(false);
+  const [assigneePickerContext, setAssigneePickerContext] = useState<{ processId: string; draftIndex: number } | null>(null);
+  const [assigneePickerMode, setAssigneePickerMode] = useState<'company' | 'project'>('company');
+  const [availableEmployees, setAvailableEmployees] = useState<Array<{ id: string; name: string; company: string }>>([]);
+  const [selectedEmployeesIds, setSelectedEmployeesIds] = useState<string[]>([]);
+  const [pickerCompanies, setPickerCompanies] = useState<Array<{ inn: string; name: string }>>([]);
+  const [pickerProjects, setPickerProjects] = useState<Array<{ id: string; name: string }>>([]);
+  const [pickerCompanyMap, setPickerCompanyMap] = useState<Record<string, any>>({});
+  const [editingSteps, setEditingSteps] = useState<Record<string, Record<number, {
+    name: string;
+    timeLimit: number;
+    isRequired: boolean;
+    canFinishOnThis: boolean;
+    canSkip: boolean;
+    autoReject: boolean;
+    requireAll: boolean;
+  }>>>({});
+
+  const filteredProcesses = processes.filter(process => {
     const matchesSearch = process.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
                          process.description.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesStatus = statusFilter === 'all' || process.status === statusFilter;
@@ -223,13 +276,261 @@ export default function Processes() {
     return matchesSearch && matchesStatus && matchesType;
   });
 
+  const createEmptySteps = (count: number): ProcessStep[] => {
+    return Array.from({ length: count }, (_, index) => ({
+      id: `step-new-${index + 1}-${Date.now()}`,
+      name: `Шаг ${index + 1}`,
+      order: index + 1,
+      participants: [],
+      timeLimit: 3,
+      isRequired: true,
+      canFinishOnThis: index + 1 === count,
+      canSkip: false,
+      autoReject: false,
+      rules: []
+    }));
+  };
+
   const handleCreateProcess = () => {
-    console.log('Creating new process');
+    const id = `proc-${Date.now()}`;
+
+    let sourceProcess: Process | undefined = undefined;
+    let stepsForProcess: ProcessStep[] = [];
+    if (creationOption === 'template' && selectedTemplateId) {
+      sourceProcess = processes.find(p => p.id === selectedTemplateId);
+      stepsForProcess = processStepsMap[selectedTemplateId] || mockSteps;
+    } else if (creationOption === 'copy' && selectedCopyId) {
+      sourceProcess = processes.find(p => p.id === selectedCopyId);
+      stepsForProcess = processStepsMap[selectedCopyId] || mockSteps;
+    } else {
+      // Для нового процесса не создаём шаги, а показываем формы создания
+      stepsForProcess = [];
+    }
+
+    const newProcess: Process = {
+      id,
+      name: createName || 'Новый процесс',
+      description: createDescription || '',
+      type: (sourceProcess?.type || createType || 'approval') as 'approval' | 'review' | 'custom',
+      status: 'draft',
+      steps: stepsForProcess.length,
+      projectsCount: createProject ? 1 : 0,
+      documentsProcessed: 0,
+      createdDate: new Date().toISOString().slice(0, 10),
+      isTemplate: false,
+      averageTime: 'Не определено'
+    };
+
+    setProcesses([newProcess, ...processes]);
+    setProcessStepsMap({ ...processStepsMap, [id]: stepsForProcess });
+    if (creationOption === 'new') {
+      setProcessInitialCreateForms({ ...processInitialCreateForms, [id]: createStepsCount || 1 });
+      const drafts: NewStepForm[] = Array.from({ length: createStepsCount || 1 }).map((_, i) => ({
+        tempId: `draft-${i + 1}-${Date.now()}`,
+        name: `Шаг ${i + 1}`,
+        timeLimit: 3,
+        isRequired: true,
+        canFinishOnThis: (i + 1) === (createStepsCount || 1),
+        canSkip: false,
+        autoReject: false
+      }));
+      setDraftStepsMap({ ...draftStepsMap, [id]: drafts });
+    }
     setIsCreateDialogOpen(false);
   };
 
-  const handleDuplicateProcess = (processId: string) => {
-    console.log('Duplicating process:', processId);
+  const addDraftStep = (processId: string) => {
+    const list = draftStepsMap[processId] || [];
+    const nextIndex = list.length + (processStepsMap[processId]?.length || 0) + 1;
+    const newDraft: NewStepForm = {
+      tempId: `draft-add-${Date.now()}`,
+      name: `Шаг ${nextIndex}`,
+      timeLimit: 3,
+      isRequired: true,
+      canFinishOnThis: false,
+      canSkip: false,
+      autoReject: false,
+      participants: [],
+      requireAllParticipants: false
+    };
+    setDraftStepsMap({ ...draftStepsMap, [processId]: [...list, newDraft] });
+  };
+
+  const saveDraftStep = (processId: string, draftIndex: number) => {
+    const drafts = draftStepsMap[processId] || [];
+    const draft = drafts[draftIndex];
+    if (!draft) return;
+    const existing = processStepsMap[processId] || [];
+    const newStep: ProcessStep = {
+      id: `step-${Date.now()}`,
+      name: draft.name,
+      order: existing.length + 1,
+      participants: draft.participants || [],
+      timeLimit: draft.timeLimit,
+      isRequired: draft.isRequired,
+      canFinishOnThis: draft.canFinishOnThis,
+      canSkip: draft.canSkip,
+      autoReject: draft.autoReject,
+      rules: [
+        { id: `rule-all-${Date.now()}`, type: 'all_required', enabled: draft.requireAllParticipants, description: 'Требуется проверка всех участников шага' },
+        { id: `rule-af-${Date.now()}`, type: 'can_finish', enabled: draft.canFinishOnThis, description: 'Возможность завершить согласование на текущем шаге' },
+        { id: `rule-ar-${Date.now()}`, type: 'auto_reject', enabled: draft.autoReject, description: 'Отклонение при несогласовании' }
+      ]
+    };
+    const updatedDrafts = drafts.filter((_, i) => i !== draftIndex);
+    setDraftStepsMap({ ...draftStepsMap, [processId]: updatedDrafts });
+    setProcessStepsMap({ ...processStepsMap, [processId]: [...existing, newStep] });
+    if (updatedDrafts.length === 0) {
+      const { [processId]: _, ...rest } = processInitialCreateForms;
+      setProcessInitialCreateForms(rest);
+    }
+  };
+
+  const deleteDraftStep = (processId: string, draftIndex: number) => {
+    const drafts = draftStepsMap[processId] || [];
+    const updated = drafts.filter((_, i) => i !== draftIndex);
+    setDraftStepsMap({ ...draftStepsMap, [processId]: updated });
+    if (updated.length === 0) {
+      const { [processId]: _, ...rest } = processInitialCreateForms;
+      setProcessInitialCreateForms(rest);
+    }
+  };
+
+  const deleteSavedStep = (processId: string, stepIndex: number) => {
+    const existing = processStepsMap[processId] || [];
+    const updated = existing.filter((_, i) => i !== stepIndex).map((s, idx) => ({ ...s, order: idx + 1 }));
+    setProcessStepsMap({ ...processStepsMap, [processId]: updated });
+  };
+
+  const updateDraftStep = (processId: string, draftIndex: number, partial: Partial<NewStepForm>) => {
+    const drafts = draftStepsMap[processId] || [];
+    const updated = drafts.map((d, i) => (i === draftIndex ? { ...d, ...partial } : d));
+    setDraftStepsMap({ ...draftStepsMap, [processId]: updated });
+  };
+
+  const applyProcessChanges = () => {
+    setSelectedProcess(null);
+  };
+
+  const startEditStep = (processId: string, stepIndex: number) => {
+    const steps = processStepsMap[processId] || [];
+    const step = steps[stepIndex];
+    if (!step) return;
+    const rules = step.rules || [];
+    const getRule = (t: any) => rules.find(r => r.type === t)?.enabled ?? false;
+    const draft = {
+      name: step.name,
+      timeLimit: step.timeLimit,
+      isRequired: step.isRequired,
+      canFinishOnThis: step.canFinishOnThis,
+      canSkip: step.canSkip,
+      autoReject: getRule('auto_reject'),
+      requireAll: getRule('all_required')
+    };
+    setEditingSteps(prev => ({ ...prev, [processId]: { ...(prev[processId] || {}), [stepIndex]: draft } }));
+  };
+
+  const cancelEditStep = (processId: string, stepIndex: number) => {
+    setEditingSteps(prev => {
+      const proc = { ...(prev[processId] || {}) };
+      delete proc[stepIndex];
+      return { ...prev, [processId]: proc };
+    });
+  };
+
+  const saveEditStep = (processId: string, stepIndex: number) => {
+    const procDraft = editingSteps[processId] || {};
+    const draft = procDraft[stepIndex];
+    if (!draft) return;
+    const steps = processStepsMap[processId] || [];
+    const step = steps[stepIndex];
+    if (!step) return;
+    const newRules = [
+      { id: `rule-all-${Date.now()}`, type: 'all_required', enabled: draft.requireAll, description: 'Требуется проверка всех участников шага' },
+      { id: `rule-af-${Date.now()}`, type: 'can_finish', enabled: draft.canFinishOnThis, description: 'Возможность завершить согласование на текущем шаге' },
+      { id: `rule-ar-${Date.now()}`, type: 'auto_reject', enabled: draft.autoReject, description: 'Отклонение при несогласовании' }
+    ];
+    const updatedStep = { ...step, name: draft.name, timeLimit: draft.timeLimit, isRequired: draft.isRequired, canFinishOnThis: draft.canFinishOnThis, canSkip: draft.canSkip, autoReject: draft.autoReject, rules: newRules } as ProcessStep;
+    const updatedSteps = steps.map((s, i) => i === stepIndex ? updatedStep : s);
+    setProcessStepsMap({ ...processStepsMap, [processId]: updatedSteps });
+    cancelEditStep(processId, stepIndex);
+  };
+
+  const duplicateSavedStep = (processId: string, stepIndex: number) => {
+    const steps = processStepsMap[processId] || [];
+    const step = steps[stepIndex];
+    if (!step) return;
+    const newStep: ProcessStep = {
+      ...step,
+      id: `step-copy-${Date.now()}`,
+      name: `${step.name} - копия`,
+      order: steps.length + 1,
+    };
+    setProcessStepsMap({ ...processStepsMap, [processId]: [...steps, newStep] });
+  };
+
+  const openAssigneePicker = async (processId: string, draftIndex: number) => {
+    setAssigneePickerContext({ processId, draftIndex });
+    setAssigneePickerMode('company');
+    setSelectedEmployeesIds([]);
+    setAvailableEmployees([]);
+    setAssigneePickerOpen(true);
+    try {
+      // агрегируем компании со всех объектов
+      const projects = listProjects();
+      setPickerProjects(projects);
+      const allCompaniesArrays = await Promise.all(projects.map(p => getProjectCompanies(p.id)));
+      const byInn: Record<string, any> = {};
+      allCompaniesArrays.flat().forEach(c => {
+        if (!byInn[c.inn]) byInn[c.inn] = { ...c };
+      });
+      setPickerCompanyMap(byInn);
+      setPickerCompanies(Object.values(byInn).map((c: any) => ({ inn: c.inn, name: c.name })));
+    } catch (e) {
+      setPickerCompanies([]);
+      setPickerProjects([]);
+    }
+  };
+
+  const loadEmployeesFromCompany = async (projectId: string, companyInn?: string) => {
+    const companies = await getProjectCompanies(projectId);
+    const filtered = companyInn ? companies.filter(c => c.inn === companyInn) : companies;
+    const emps = await getEmployeesForCompanies(filtered);
+    setAvailableEmployees(emps.map(e => ({ id: e.id, name: e.name, company: e.companyName })));
+  };
+
+  const loadEmployeesFromProject = async (projectId: string) => {
+    const emps = await getProjectEmployees(projectId);
+    setAvailableEmployees(emps.map(e => ({ id: e.id, name: e.name, company: e.companyName })));
+  };
+
+  const loadEmployeesFromCompanyGlobal = async (companyInn?: string) => {
+    const companies = companyInn && pickerCompanyMap[companyInn] ? [pickerCompanyMap[companyInn]] : Object.values(pickerCompanyMap);
+    const emps = await getEmployeesForCompanies(companies as any);
+    setAvailableEmployees(emps.map(e => ({ id: e.id, name: e.name, company: e.companyName })));
+  };
+
+  const handleDuplicateProcess = (process: Process) => {
+    setProcessToDuplicate(process);
+    setDuplicateName(`${process.name} - копия`);
+    setIsDuplicateDialogOpen(true);
+  };
+
+  const confirmDuplicate = () => {
+    if (!processToDuplicate) return;
+    const newProcess: Process = {
+      ...processToDuplicate,
+      id: `${processToDuplicate.id}-copy-${Date.now()}`,
+      name: duplicateName || `${processToDuplicate.name} - копия`,
+      status: processToDuplicate.status,
+      createdDate: new Date().toISOString().slice(0, 10),
+      lastUsed: undefined
+    };
+    setProcesses([newProcess, ...processes]);
+    const steps = processStepsMap[processToDuplicate.id] || mockSteps;
+    setProcessStepsMap({ ...processStepsMap, [newProcess.id]: steps });
+    setIsDuplicateDialogOpen(false);
+    setProcessToDuplicate(null);
   };
 
   const handleArchiveProcess = (processId: string) => {
@@ -276,11 +577,11 @@ export default function Processes() {
                   <div className="grid grid-cols-2 gap-4">
                     <div>
                       <Label htmlFor="processType">Тип рабочего процесса *</Label>
-                      <Select>
+                      <Select value={createType} onValueChange={(v: 'approval' | 'review' | 'custom') => setCreateType(v)}>
                         <SelectTrigger>
                           <SelectValue placeholder="Выберите тип" />
                         </SelectTrigger>
-                        <SelectContent>
+                        <SelectContent className="w-[--radix-select-trigger-width]">
                           <SelectItem value="approval">Согласование документов</SelectItem>
                           <SelectItem value="review">Рассмотрение и проверка</SelectItem>
                           <SelectItem value="custom">Специализированный</SelectItem>
@@ -289,24 +590,24 @@ export default function Processes() {
                     </div>
                     <div>
                       <Label htmlFor="processSteps">Количество шагов *</Label>
-                      <Input type="number" min="1" max="10" defaultValue="2" />
+                      <Input type="number" min="1" max="10" value={createStepsCount} onChange={(e) => setCreateStepsCount(Number(e.target.value))} />
                     </div>
                   </div>
                   <div>
                     <Label htmlFor="processName">Название процесса *</Label>
-                    <Input id="processName" placeholder="Например, 'Согласование проектной документации'" />
+                    <Input id="processName" placeholder="Например, 'Согласование проектной документации'" value={createName} onChange={(e) => setCreateName(e.target.value)} />
                   </div>
                   <div>
                     <Label htmlFor="processDescription">Описание</Label>
-                    <Textarea id="processDescription" placeholder="Краткое описание процесса..." rows={3} />
+                    <Textarea id="processDescription" placeholder="Краткое описание процесса..." rows={3} value={createDescription} onChange={(e) => setCreateDescription(e.target.value)} />
                   </div>
                   <div>
                     <Label htmlFor="processProject">Привязка к объекту</Label>
-                    <Select>
+                    <Select value={createProject} onValueChange={setCreateProject}>
                       <SelectTrigger>
                         <SelectValue placeholder="Выберите объект (необязательно)" />
                       </SelectTrigger>
-                      <SelectContent>
+                      <SelectContent className="w-[--radix-select-trigger-width]">
                         <SelectItem value="project-1">ЖК «Северный парк»</SelectItem>
                         <SelectItem value="project-2">БЦ «Технологический»</SelectItem>
                         <SelectItem value="project-3">ТРК «Галерея»</SelectItem>
@@ -319,21 +620,21 @@ export default function Processes() {
                 <div className="space-y-4">
                   <h3 className="text-lg font-medium">Способ создания</h3>
                   <div className="grid grid-cols-3 gap-4">
-                    <Card className="cursor-pointer hover:shadow-md transition-shadow border-2 border-blue-500">
+                    <Card onClick={() => setCreationOption('new')} className={`cursor-pointer hover:shadow-md transition-shadow border-2 ${creationOption === 'new' ? 'border-blue-500' : 'border-transparent'}`}>
                       <CardContent className="p-4 text-center">
                         <Plus className="w-8 h-8 mx-auto mb-2 text-blue-500" />
                         <h4 className="font-medium mb-1">Создать с нуля</h4>
                         <p className="text-sm text-gray-600">Настроить все шаги вручную</p>
                       </CardContent>
                     </Card>
-                    <Card className="cursor-pointer hover:shadow-md transition-shadow">
+                    <Card onClick={() => setCreationOption('template')} className={`cursor-pointer hover:shadow-md transition-shadow border-2 ${creationOption === 'template' ? 'border-blue-500' : 'border-transparent'}`}>
                       <CardContent className="p-4 text-center">
                         <FileText className="w-8 h-8 mx-auto mb-2 text-purple-500" />
                         <h4 className="font-medium mb-1">Использовать шаблон</h4>
                         <p className="text-sm text-gray-600">На основе готового шаблона</p>
                       </CardContent>
                     </Card>
-                    <Card className="cursor-pointer hover:shadow-md transition-shadow">
+                    <Card onClick={() => setCreationOption('copy')} className={`cursor-pointer hover:shadow-md transition-shadow border-2 ${creationOption === 'copy' ? 'border-blue-500' : 'border-transparent'}`}>
                       <CardContent className="p-4 text-center">
                         <Copy className="w-8 h-8 mx-auto mb-2 text-green-500" />
                         <h4 className="font-medium mb-1">Копировать существующий</h4>
@@ -341,6 +642,36 @@ export default function Processes() {
                       </CardContent>
                     </Card>
                   </div>
+                  {creationOption === 'template' && (
+                    <div>
+                      <Label htmlFor="templateSelect">Выберите шаблон</Label>
+                      <Select value={selectedTemplateId} onValueChange={setSelectedTemplateId}>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Шаблон процесса" />
+                        </SelectTrigger>
+                        <SelectContent className="w-[--radix-select-trigger-width]">
+                          {processes.filter(p => p.isTemplate).map(t => (
+                            <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
+                  {creationOption === 'copy' && (
+                    <div>
+                      <Label htmlFor="copySelect">Выберите процесс для копирования</Label>
+                      <Select value={selectedCopyId} onValueChange={setSelectedCopyId}>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Существующий процесс" />
+                        </SelectTrigger>
+                        <SelectContent className="w-[--radix-select-trigger-width]">
+                          {processes.map(p => (
+                            <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
                 </div>
 
                 <div className="flex justify-end space-x-2">
@@ -356,46 +687,13 @@ export default function Processes() {
           </Dialog>
         </div>
 
-        {/* Statistics */}
-        <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
-          <Card>
-            <CardContent className="p-6">
-              <div className="text-2xl font-bold text-blue-600">{stats.total}</div>
-              <div className="text-sm text-gray-600">Всего процессов</div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="p-6">
-              <div className="text-2xl font-bold text-green-600">{stats.active}</div>
-              <div className="text-sm text-gray-600">Активных</div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="p-6">
-              <div className="text-2xl font-bold text-purple-600">{stats.templates}</div>
-              <div className="text-sm text-gray-600">Шаблонов</div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="p-6">
-              <div className="text-2xl font-bold text-gray-600">{stats.draft}</div>
-              <div className="text-sm text-gray-600">Черновиков</div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="p-6">
-              <div className="text-2xl font-bold text-orange-600">{stats.totalDocuments}</div>
-              <div className="text-sm text-gray-600">Документов обработано</div>
-            </CardContent>
-          </Card>
-        </div>
+        
 
         {/* Main Content */}
         <Tabs value={activeTab} onValueChange={setActiveTab}>
           <TabsList>
             <TabsTrigger value="list">Список процессов</TabsTrigger>
             <TabsTrigger value="templates">Шаблоны</TabsTrigger>
-            <TabsTrigger value="analytics">Аналитика</TabsTrigger>
           </TabsList>
 
           <TabsContent value="list" className="mt-6">
@@ -527,7 +825,7 @@ export default function Processes() {
                             <Edit className="w-4 h-4 mr-2" />
                             Редактировать
                           </Button>
-                          <Button variant="outline" size="sm" onClick={() => handleDuplicateProcess(process.id)}>
+                          <Button variant="outline" size="sm" onClick={() => handleDuplicateProcess(process)}>
                             <Copy className="w-4 h-4 mr-2" />
                             Дублировать
                           </Button>
@@ -556,28 +854,60 @@ export default function Processes() {
           </TabsContent>
 
           <TabsContent value="templates" className="mt-6">
-            <Card>
-              <CardContent className="p-8 text-center">
-                <FileText className="w-12 h-12 mx-auto mb-4 text-gray-300" />
-                <h3 className="text-lg font-medium text-gray-900 mb-2">Шаблоны процессов</h3>
-                <p className="text-gray-500">
-                  Готовые шаблоны процессов согласования для быстрого создания
-                </p>
-              </CardContent>
-            </Card>
+            <div className="space-y-4">
+              {filteredProcesses.filter(p => p.isTemplate).map((process) => {
+                const statusInfo = statusConfig[process.status];
+                const typeInfo = typeConfig[process.type];
+                const StatusIcon = statusInfo.icon;
+                const TypeIcon = typeInfo.icon;
+                return (
+                  <Card key={process.id} className="hover:shadow-lg transition-shadow">
+                    <CardContent className="p-6">
+                      <div className="flex items-start justify-between">
+                        <div className="flex-1">
+                          <div className="flex items-center space-x-3 mb-3">
+                            <Workflow className="w-6 h-6 text-gray-400" />
+                            <h3 className="text-xl font-semibold">{process.name}</h3>
+                            <Badge className={`${statusInfo.color} text-white`}>
+                              <StatusIcon className="w-3 h-3 mr-1" />
+                              {statusInfo.label}
+                            </Badge>
+                            <Badge className={`${typeInfo.color} text-white`}>
+                              <TypeIcon className="w-3 h-3 mr-1" />
+                              {typeInfo.label}
+                            </Badge>
+                            <Badge variant="outline">
+                              <FileText className="w-3 h-3 mr-1" />
+                              Шаблон
+                            </Badge>
+                          </div>
+                          <p className="text-gray-600 mb-4">{process.description}</p>
+                        </div>
+                        <div className="flex flex-col space-y-2 ml-6">
+                          <Button variant="outline" size="sm" onClick={() => setSelectedProcess(process)}>
+                            <Edit className="w-4 h-4 mr-2" />
+                            Редактировать
+                          </Button>
+                          <Button variant="outline" size="sm" onClick={() => handleDuplicateProcess(process)}>
+                            <Copy className="w-4 h-4 mr-2" />
+                            Дублировать
+                          </Button>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                );
+              })}
+              {filteredProcesses.filter(p => p.isTemplate).length === 0 && (
+                <div className="text-center py-12">
+                  <FileText className="w-12 h-12 mx-auto mb-4 text-gray-300" />
+                  <p className="text-gray-500">Шаблоны не найдены</p>
+                </div>
+              )}
+            </div>
           </TabsContent>
 
-          <TabsContent value="analytics" className="mt-6">
-            <Card>
-              <CardContent className="p-8 text-center">
-                <Settings className="w-12 h-12 mx-auto mb-4 text-gray-300" />
-                <h3 className="text-lg font-medium text-gray-900 mb-2">Аналитика процессов</h3>
-                <p className="text-gray-500">
-                  Статистика использования процессов, время выполнения, эффективность
-                </p>
-              </CardContent>
-            </Card>
-          </TabsContent>
+          
         </Tabs>
 
         {filteredProcesses.length === 0 && activeTab === 'list' && (
@@ -609,13 +939,120 @@ export default function Processes() {
                   <div className="space-y-4">
                     <div className="flex items-center justify-between">
                       <h3 className="text-lg font-medium">Настройка шагов</h3>
-                      <Button size="sm">
+                      <Button size="sm" onClick={() => addDraftStep(selectedProcess.id)}>
                         <Plus className="w-4 h-4 mr-2" />
                         Добавить шаг
                       </Button>
                     </div>
+                    {/* Показать формы создания шага, если процесс создан "с нуля" или уже есть черновики шагов */}
+                    {processInitialCreateForms[selectedProcess.id] || (draftStepsMap[selectedProcess.id] && draftStepsMap[selectedProcess.id].length > 0) ? (
+                      <div className="space-y-4">
+                        {Array.from({ length: (draftStepsMap[selectedProcess.id]?.length || processInitialCreateForms[selectedProcess.id]) }).map((_, idx) => (
+                          <Card key={`new-step-form-${idx}`}>
+                            <CardHeader>
+                              <div className="flex items-center justify-between">
+                                <CardTitle className="text-lg flex items-center">
+                                  <span className="w-8 h-8 bg-blue-500 text-white rounded-full flex items-center justify-center mr-3 text-sm">{idx + 1}</span>
+                                  Новый шаг
+                                </CardTitle>
+                                <div className="flex items-center space-x-2">
+                                  <Badge variant="secondary">Черновик шага</Badge>
+                                  <Button variant="outline" size="sm" onClick={() => deleteDraftStep(selectedProcess.id, idx)}>
+                                    <Trash2 className="w-4 h-4 mr-2" />
+                                    Удалить шаг
+                                  </Button>
+                                </div>
+                              </div>
+                            </CardHeader>
+                            <CardContent>
+                              <div className="grid grid-cols-2 gap-6">
+                                <div>
+                                  <h4 className="font-medium mb-3">Параметры шага</h4>
+                                  <div className="space-y-3">
+                                    <div>
+                                      <Label>Название шага</Label>
+                                      <Input placeholder={`Шаг ${idx + 1}`} value={(draftStepsMap[selectedProcess.id]?.[idx]?.name) || ''} onChange={(e) => updateDraftStep(selectedProcess.id, idx, { name: e.target.value })} />
+                                    </div>
+                                    <div>
+                                      <Label>Время согласования (дней)</Label>
+                                      <Input type="number" min="1" value={(draftStepsMap[selectedProcess.id]?.[idx]?.timeLimit) ?? 3} onChange={(e) => updateDraftStep(selectedProcess.id, idx, { timeLimit: Number(e.target.value) })} />
+                                    </div>
+                                    <div className="flex items-center space-x-2">
+                                      <Checkbox checked={(draftStepsMap[selectedProcess.id]?.[idx]?.isRequired) ?? true} onCheckedChange={(v) => updateDraftStep(selectedProcess.id, idx, { isRequired: Boolean(v) })} />
+                                      <span className="text-sm">Обязательный шаг</span>
+                                    </div>
+                                    <div className="flex items-center space-x-2">
+                                      <Checkbox checked={(draftStepsMap[selectedProcess.id]?.[idx]?.canSkip) ?? false} onCheckedChange={(v) => updateDraftStep(selectedProcess.id, idx, { canSkip: Boolean(v) })} />
+                                      <span className="text-sm">Можно пропустить</span>
+                                    </div>
+                                    <div className="flex items-center space-x-2">
+                                      <Checkbox checked={(draftStepsMap[selectedProcess.id]?.[idx]?.autoReject) ?? false} onCheckedChange={(v) => updateDraftStep(selectedProcess.id, idx, { autoReject: Boolean(v) })} />
+                                      <span className="text-sm">Авто-отклонение при несогласовании</span>
+                                    </div>
+                                    <div className="flex items-center space-x-2">
+                                      <Checkbox checked={(draftStepsMap[selectedProcess.id]?.[idx]?.requireAllParticipants) ?? false} onCheckedChange={(v) => updateDraftStep(selectedProcess.id, idx, { requireAllParticipants: Boolean(v) })} />
+                                      <span className="text-sm">Требуется проверка всех участников шага</span>
+                                    </div>
+                                    <div className="pt-2">
+                                      <Button size="sm" onClick={() => saveDraftStep(selectedProcess.id, idx)}>
+                                        Сохранить шаг
+                                      </Button>
+                                    </div>
+                                  </div>
+                                </div>
+                                <div>
+                                  <h4 className="font-medium mb-3">Участники шага</h4>
+                                  <div className="space-y-2">
+                                    {(draftStepsMap[selectedProcess.id]?.[idx]?.participants?.length || 0) === 0 ? (
+                                      <div className="p-2 bg-gray-50 rounded text-sm text-gray-500">Пока нет участников</div>
+                                    ) : (
+                                      (draftStepsMap[selectedProcess.id]?.[idx]?.participants || []).map((p) => (
+                                        <div key={p.id} className="flex items-center justify-between p-2 bg-gray-50 rounded">
+                                          <div className="flex items-center space-x-2">
+                                            <User className="w-4 h-4 text-gray-500" />
+                                            <div>
+                                              <div className="text-sm font-medium">{p.name}</div>
+                                              <div className="text-xs text-gray-500">{p.role}</div>
+                                            </div>
+                                          </div>
+                                          <div className="flex items-center space-x-2">
+                                            <Badge variant={p.isRequired ? 'default' : 'secondary'} className="text-xs">
+                                              {p.isRequired ? 'Обязательный' : 'Опциональный'}
+                                            </Badge>
+                                            <Button variant="ghost" size="sm" onClick={() => {
+                                              const drafts = draftStepsMap[selectedProcess.id] || [];
+                                              const draft = drafts[idx];
+                                              const updated = (draft.participants || []).filter((pp) => pp.id !== p.id);
+                                              const updatedDraft = { ...draft, participants: updated } as NewStepForm;
+                                              const updatedDrafts = drafts.map((d, i) => i === idx ? updatedDraft : d);
+                                              setDraftStepsMap({ ...draftStepsMap, [selectedProcess.id]: updatedDrafts });
+                                            }}>
+                                              <Trash2 className="w-4 h-4" />
+                                            </Button>
+                                          </div>
+                                        </div>
+                                      ))
+                                    )}
+                                    <div className="grid grid-cols-1 gap-2">
+                                      <Button variant="outline" size="sm" onClick={() => openAssigneePicker(selectedProcess.id, idx)}>
+                                        <User className="w-4 h-4 mr-2" />
+                                        Добавить пользователя
+                                      </Button>
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+                            </CardContent>
+                          </Card>
+                        ))}
+                        <div className="flex justify-end">
+                          <Button onClick={applyProcessChanges}>Применить изменения</Button>
+                        </div>
+                      </div>
+                    ) : (
                     
-                    {mockSteps.map((step, index) => (
+                    /* Иначе показываем существующие шаги */
+                    (processStepsMap[selectedProcess.id] || mockSteps).map((step, index) => (
                       <Card key={step.id}>
                         <CardHeader>
                           <div className="flex items-center justify-between">
@@ -648,12 +1085,21 @@ export default function Processes() {
                                         <div className="text-xs text-gray-500">{participant.role}</div>
                                       </div>
                                     </div>
-                                    <Badge variant={participant.isRequired ? 'default' : 'secondary'} className="text-xs">
-                                      {participant.isRequired ? 'Обязательный' : 'Опциональный'}
-                                    </Badge>
+                                    <div className="flex items-center space-x-2">
+                                      <Badge variant={participant.isRequired ? 'default' : 'secondary'} className="text-xs">
+                                        {participant.isRequired ? 'Обязательный' : 'Опциональный'}
+                                      </Badge>
+                                      <Button variant="ghost" size="sm" onClick={() => {
+                                        const steps = processStepsMap[selectedProcess.id] || [];
+                                        const updated = steps.map((s, i) => i === index ? { ...s, participants: s.participants.filter(p => p.id !== participant.id) } : s);
+                                        setProcessStepsMap({ ...processStepsMap, [selectedProcess.id]: updated });
+                                      }}>
+                                        <Trash2 className="w-4 h-4" />
+                                      </Button>
+                                    </div>
                                   </div>
                                 ))}
-                                <Button variant="outline" size="sm" className="w-full">
+                                <Button variant="outline" size="sm" className="w-full" onClick={() => openAssigneePicker(selectedProcess.id, -1)}>
                                   <Plus className="w-4 h-4 mr-2" />
                                   Добавить участника
                                 </Button>
@@ -667,24 +1113,102 @@ export default function Processes() {
                                   <span className="text-sm">Время согласования</span>
                                   <span className="text-sm font-medium">{step.timeLimit} дней</span>
                                 </div>
-                                
-                                {step.rules.map((rule) => (
-                                  <div key={rule.id} className="flex items-center space-x-2">
-                                    <Checkbox checked={rule.enabled} />
-                                    <span className="text-sm">{rule.description}</span>
-                                  </div>
-                                ))}
+                                {(function(){
+                                  const isEditing = Boolean(editingSteps[selectedProcess.id]?.[index]);
+                                  const draft = editingSteps[selectedProcess.id]?.[index];
+                                  const requiredChecked = isEditing ? (draft?.isRequired ?? step.isRequired) : step.isRequired;
+                                  const canSkipChecked = isEditing ? (draft?.canSkip ?? step.canSkip) : step.canSkip;
+                                  return (
+                                    <>
+                                      <div className="flex items-center space-x-2">
+                                        <Checkbox checked={requiredChecked} disabled={!isEditing} onCheckedChange={(v)=>{
+                                          if(!isEditing) return;
+                                          const procDraft = editingSteps[selectedProcess.id] || {};
+                                          const d = procDraft[index] || {} as any;
+                                          const updated = { ...d, isRequired: Boolean(v) };
+                                          setEditingSteps({ ...editingSteps, [selectedProcess.id]: { ...procDraft, [index]: updated } });
+                                        }} />
+                                        <span className="text-sm">Обязательный шаг</span>
+                                      </div>
+                                      <div className="flex items-center space-x-2">
+                                        <Checkbox checked={canSkipChecked} disabled={!isEditing} onCheckedChange={(v)=>{
+                                          if(!isEditing) return;
+                                          const procDraft = editingSteps[selectedProcess.id] || {};
+                                          const d = procDraft[index] || {} as any;
+                                          const updated = { ...d, canSkip: Boolean(v) };
+                                          setEditingSteps({ ...editingSteps, [selectedProcess.id]: { ...procDraft, [index]: updated } });
+                                        }} />
+                                        <span className="text-sm">Можно пропустить</span>
+                                      </div>
+                                    </>
+                                  );
+                                })()}
+                                {step.rules.map((rule) => {
+                                  const isEditing = Boolean(editingSteps[selectedProcess.id]?.[index]);
+                                  const draft = editingSteps[selectedProcess.id]?.[index];
+                                  const currentChecked = isEditing
+                                    ? (rule.type === 'all_required'
+                                      ? draft.requireAll
+                                      : rule.type === 'can_finish'
+                                        ? draft.canFinishOnThis
+                                        : rule.type === 'auto_reject'
+                                          ? draft.autoReject
+                                          : rule.enabled)
+                                    : rule.enabled;
+                                  return (
+                                    <div key={rule.id} className="flex items-center space-x-2">
+                                      <Checkbox
+                                        checked={currentChecked}
+                                        disabled={!isEditing}
+                                        onCheckedChange={(v) => {
+                                          if (!isEditing) return;
+                                          const procDraft = editingSteps[selectedProcess.id] || {};
+                                          const d = procDraft[index];
+                                          if (!d) return;
+                                          const updated = { ...d } as any;
+                                          if (rule.type === 'all_required') updated.requireAll = Boolean(v);
+                                          if (rule.type === 'can_finish') updated.canFinishOnThis = Boolean(v);
+                                          if (rule.type === 'auto_reject') updated.autoReject = Boolean(v);
+                                          setEditingSteps({ ...editingSteps, [selectedProcess.id]: { ...procDraft, [index]: updated } });
+                                        }}
+                                      />
+                                      <span className="text-sm">{rule.type === 'can_finish' ? 'Возможность проставить статус согласования' : rule.description}</span>
+                                    </div>
+                                  );
+                                })}
                                 
                                 <div className="pt-2 border-t border-gray-200">
-                                  <div className="grid grid-cols-2 gap-2">
-                                    <Button variant="outline" size="sm">
-                                      <Edit className="w-4 h-4 mr-2" />
-                                      Редактировать
-                                    </Button>
-                                    <Button variant="outline" size="sm">
-                                      <Copy className="w-4 h-4 mr-2" />
-                                      Дублировать
-                                    </Button>
+                                  <div className="grid grid-cols-3 gap-2">
+                                    {editingSteps[selectedProcess.id]?.[index] ? (
+                                      <>
+                                        <Button variant="outline" size="sm" onClick={() => saveEditStep(selectedProcess.id, index)}>
+                                          <Edit className="w-4 h-4 mr-2" />
+                                          Сохранить
+                                        </Button>
+                                        <Button variant="outline" size="sm" onClick={() => cancelEditStep(selectedProcess.id, index)}>
+                                          Отмена
+                                        </Button>
+                                        <Button variant="outline" size="sm" onClick={() => duplicateSavedStep(selectedProcess.id, index)}>
+                                          <Copy className="w-4 h-4 mr-2" />
+                                          Дублировать
+                                        </Button>
+                                      </>
+                                    ) : (
+                                      <>
+                                        <Button variant="outline" size="sm" onClick={() => startEditStep(selectedProcess.id, index)}>
+                                          <Edit className="w-4 h-4 mr-2" />
+                                          Редактировать
+                                        </Button>
+                                        <Button variant="outline" size="sm" onClick={() => duplicateSavedStep(selectedProcess.id, index)}>
+                                          <Copy className="w-4 h-4 mr-2" />
+                                          Дублировать
+                                        </Button>
+                                        <Button variant="outline" size="sm" onClick={() => deleteSavedStep(selectedProcess.id, index)}>
+                                          <Trash2 className="w-4 h-4 mr-2" />
+                                          Удалить шаг
+                                        </Button>
+                                      </>
+                                    )}
                                   </div>
                                 </div>
                               </div>
@@ -692,7 +1216,11 @@ export default function Processes() {
                           </div>
                         </CardContent>
                       </Card>
-                    ))}
+                    ))
+                    )}
+                    <div className="flex justify-end mt-4">
+                      <Button onClick={applyProcessChanges}>Применить изменения</Button>
+                    </div>
                   </div>
                 </TabsContent>
 
@@ -710,7 +1238,7 @@ export default function Processes() {
                           <SelectTrigger>
                             <SelectValue />
                           </SelectTrigger>
-                          <SelectContent>
+                          <SelectContent className="w-[--radix-select-trigger-width]">
                             <SelectItem value="approval">Согласование документов</SelectItem>
                             <SelectItem value="review">Рассмотрение и проверка</SelectItem>
                             <SelectItem value="custom">Специализированный</SelectItem>
@@ -737,6 +1265,148 @@ export default function Processes() {
             </DialogContent>
           </Dialog>
         )}
+
+        {/* Duplicate Process Dialog */}
+        <Dialog open={isDuplicateDialogOpen} onOpenChange={setIsDuplicateDialogOpen}>
+          <DialogContent className="max-w-lg">
+            <DialogHeader>
+              <DialogTitle className="flex items-center space-x-2">
+                <Copy className="w-5 h-5" />
+                <span>Дублирование процесса</span>
+              </DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4">
+              <div>
+                <Label htmlFor="duplicateName">Новое имя процесса</Label>
+                <Input id="duplicateName" value={duplicateName} onChange={(e) => setDuplicateName(e.target.value)} />
+              </div>
+              <div className="flex justify-end space-x-2">
+                <Button variant="outline" onClick={() => setIsDuplicateDialogOpen(false)}>Отмена</Button>
+                <Button onClick={confirmDuplicate}>Дублировать</Button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        {/* Assignee Picker Dialog */}
+        <Dialog open={assigneePickerOpen} onOpenChange={setAssigneePickerOpen}>
+          <DialogContent className="max-w-2xl">
+            <DialogHeader>
+              <DialogTitle className="flex items-center space-x-2">
+                <User className="w-5 h-5" />
+                <span>Добавить пользователя</span>
+              </DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4">
+              <div className="flex items-center space-x-2">
+                <Button variant={assigneePickerMode === 'company' ? 'default' : 'outline'} size="sm" onClick={() => setAssigneePickerMode('company')}>Из компании</Button>
+                <Button variant={assigneePickerMode === 'project' ? 'default' : 'outline'} size="sm" onClick={() => setAssigneePickerMode('project')}>Из объекта</Button>
+              </div>
+
+              {assigneePickerMode === 'company' && (
+                <div className="space-y-2">
+                  <Label>Компания</Label>
+                  <Select onValueChange={(inn) => loadEmployeesFromCompanyGlobal(inn)}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Выберите компанию" />
+                    </SelectTrigger>
+                    <SelectContent className="w-[--radix-select-trigger-width]">
+                      {pickerCompanies.map(c => (
+                        <SelectItem key={c.inn} value={c.inn}>{c.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Button variant="outline" size="sm" onClick={() => loadEmployeesFromCompanyGlobal()}>Показать всех сотрудников всех компаний</Button>
+                </div>
+              )}
+
+              {assigneePickerMode === 'project' && selectedProcess && (
+                <div className="space-y-2">
+                  <Label>Объект</Label>
+                  <Select onValueChange={(pid) => loadEmployeesFromProject(pid)}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Выберите объект" />
+                    </SelectTrigger>
+                    <SelectContent className="w-[--radix-select-trigger-width]">
+                      {pickerProjects.map(p => (
+                        <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+
+              <div className="border rounded p-3 max-h-64 overflow-y-auto">
+                {availableEmployees.length === 0 ? (
+                  <div className="text-sm text-gray-500">Нет данных. Выберите источник выше.</div>
+                ) : (
+                  <div className="space-y-2">
+                    {availableEmployees.map((e) => (
+                      <label key={e.id} className="flex items-center justify-between p-2 bg-gray-50 rounded">
+                        <div>
+                          <div className="text-sm font-medium">{e.name}</div>
+                          <div className="text-xs text-gray-500">{e.company}</div>
+                        </div>
+                        <Checkbox checked={selectedEmployeesIds.includes(e.id)} onCheckedChange={(v) => {
+                          const checked = Boolean(v);
+                          setSelectedEmployeesIds((prev) => checked ? [...prev, e.id] : prev.filter(id => id !== e.id));
+                        }} />
+                      </label>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="flex justify-end space-x-2">
+                <Button variant="outline" onClick={() => setAssigneePickerOpen(false)}>Отмена</Button>
+                <Button onClick={() => {
+                  if (!assigneePickerContext) { setAssigneePickerOpen(false); return; }
+                  const { processId, draftIndex } = assigneePickerContext;
+                  // формируем участников из выбранных сотрудников
+                  const newParticipants: Participant[] = selectedEmployeesIds.map((id, idx) => {
+                    const emp = availableEmployees.find(e => e.id === id)!;
+                    return {
+                      id: emp.id,
+                      name: emp.name,
+                      role: 'Участник',
+                      type: 'user',
+                      isRequired: false
+                    };
+                  });
+                  if (draftIndex >= 0) {
+                    const drafts = draftStepsMap[processId] || [];
+                    const draft = drafts[draftIndex];
+                    const alreadyHas = draft?.participants?.length || 0;
+                    const participants = [...(draft?.participants || [])];
+                    newParticipants.forEach((p, idx) => {
+                      participants.push({ ...p, isRequired: alreadyHas === 0 && idx === 0 });
+                    });
+                    const updatedDraft: NewStepForm = { ...draft, participants } as NewStepForm;
+                    const updatedDrafts = drafts.map((d, i) => i === draftIndex ? updatedDraft : d);
+                    setDraftStepsMap({ ...draftStepsMap, [processId]: updatedDrafts });
+                  } else {
+                    // добавление в существующий сохранённый шаг: используем первый шаг как пример (для демо)
+                    const steps = processStepsMap[processId] || [];
+                    if (steps.length > 0) {
+                      const first = steps[0];
+                      const alreadyHas = first.participants.length;
+                      const updatedFirst: ProcessStep = {
+                        ...first,
+                        participants: [
+                          ...first.participants,
+                          ...newParticipants.map((p, idx) => ({ ...p, isRequired: alreadyHas === 0 && idx === 0 }))
+                        ]
+                      };
+                      const updatedSteps = steps.map((s, i) => i === 0 ? updatedFirst : s);
+                      setProcessStepsMap({ ...processStepsMap, [processId]: updatedSteps });
+                    }
+                  }
+                  setAssigneePickerOpen(false);
+                }}>Добавить</Button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
       </div>
     </Layout>
   );

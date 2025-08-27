@@ -443,6 +443,43 @@ export function getObjectFolderPaths(): string[] {
   return paths;
 }
 
+// ------------------ Процессы согласования и доступы (мок) ------------------
+
+export interface ProcessMeta {
+  id: string;
+  name: string;
+  status: 'active' | 'draft' | 'archived';
+  isTemplate: boolean;
+  steps: number;
+}
+
+const MOCK_PROCESSES: ProcessMeta[] = [
+  { id: 'proc-1', name: 'Стандартное согласование ПД', status: 'active', isTemplate: true, steps: 2 },
+  { id: 'proc-2', name: 'Быстрое согласование', status: 'active', isTemplate: true, steps: 1 },
+  { id: 'proc-3', name: 'Расширенное согласование экспертизы', status: 'active', isTemplate: true, steps: 4 },
+  { id: 'proc-4', name: 'Согласование для ЖК Северный парк', status: 'active', isTemplate: false, steps: 3 },
+  { id: 'proc-5', name: 'Процесс согласования ИРД', status: 'draft', isTemplate: true, steps: 2 }
+];
+
+// Карта доступов: компания -> процессы, которые админ компании может запускать
+const COMPANY_PROCESS_ACCESS: Record<string, string[]> = {
+  // по ИНН/или имени компании; в нашей демо привяжем по имени из RoleContext
+  'setlgroup': ['proc-4'],
+  'ПроектСтрой': ['proc-4'],
+  'СОД pirNew': ['proc-4']
+};
+
+export async function listAccessibleProcessesForCompany(company?: string): Promise<ProcessMeta[]> {
+  await new Promise((r) => setTimeout(r, 80));
+  const ids = company ? COMPANY_PROCESS_ACCESS[company] || [] : [];
+  const byCompany = MOCK_PROCESSES.filter(p => ids.includes(p.id));
+  // Разрешаем также все активные не шаблонные
+  const globalActives = MOCK_PROCESSES.filter(p => p.status === 'active' && !p.isTemplate);
+  const merged: Record<string, ProcessMeta> = {};
+  [...byCompany, ...globalActives].forEach(p => merged[p.id] = p);
+  return Object.values(merged);
+}
+
 // ------------------ Документы по объекту (мок) ------------------
 
 export interface SimpleDocument {

@@ -22,6 +22,7 @@ interface TaskPayload {
   dueDate: string;
   priority: 'low' | 'medium' | 'high';
   relatedDocuments?: string[];
+  relatedDocumentsDetailed?: { projectId: string; projectName: string; documents: string[] }[];
 }
 
 export default function TaskDetail() {
@@ -172,26 +173,35 @@ export default function TaskDetail() {
                 <div>
                   <Label>Связанные документы</Label>
                   <div className="border rounded-md p-3 max-h-56 overflow-y-auto">
-                    {projectId ? (
-                      docs.length > 0 ? (
-                        docs.map(doc => (
-                          <label key={doc.id} className="flex items-center space-x-2 py-1">
-                            <input
-                              type="checkbox"
-                              checked={!!selectedDocIds[doc.id]}
-                              onChange={(e) => setSelectedDocIds(prev => ({ ...prev, [doc.id]: e.target.checked }))}
-                            />
-                            <span className="text-sm">{doc.name}</span>
-                          </label>
-                        ))
-                      ) : (
-                        <div className="text-xs text-gray-500">Документы не найдены</div>
-                      )
+                    {fromState?.relatedDocumentsDetailed && fromState.relatedDocumentsDetailed.length > 0 ? (
+                      fromState.relatedDocumentsDetailed.map((g, idx) => (
+                        <div key={idx} className="mb-2">
+                          <div className="text-sm font-medium">{g.projectName}</div>
+                          {g.documents.map((n, i) => (
+                            <div key={i} className="text-sm">- {n}</div>
+                          ))}
+                        </div>
+                      ))
                     ) : (
-                      <div className="text-xs text-gray-500">Сначала выберите объект</div>
+                      <div className="text-xs text-gray-500">Нет связанных документов</div>
                     )}
                   </div>
                 </div>
+                {fromState?.relatedDocumentsDetailed && fromState.relatedDocumentsDetailed.length > 0 && (
+                  <div>
+                    <div className="text-sm font-medium text-gray-700 mb-1">Документы по объектам</div>
+                    <div className="text-xs text-gray-700 space-y-1">
+                      {fromState.relatedDocumentsDetailed.map((g, idx) => (
+                        <div key={idx}>
+                          <div className="font-medium">{g.projectName}</div>
+                          {g.documents.map((n, i) => (
+                            <div key={i}>- {n}</div>
+                          ))}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </CardContent>
             </Card>
           </TabsContent>

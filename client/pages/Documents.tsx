@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Layout from '../components/Layout';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -10,6 +10,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Label } from '@/components/ui/label';
 import { useRole } from '../contexts/RoleContext';
 import { Link } from 'react-router-dom';
+import { Checkbox } from '@/components/ui/checkbox';
+import { listAccessibleProcessesForCompany } from '../../shared/api';
 import { 
   Search, 
   Plus, 
@@ -47,6 +49,7 @@ interface Document {
   comments: number;
   description?: string;
   tags: string[];
+  processInfo?: { processId: string; processName: string; currentStep: number; totalSteps: number };
 }
 
 interface Folder {
@@ -210,8 +213,19 @@ export default function Documents() {
   const [viewMode, setViewMode] = useState<'folders' | 'documents'>('folders');
   const [isUploadDialogOpen, setIsUploadDialogOpen] = useState(false);
   const [sortBy, setSortBy] = useState('lastModified');
+  const [documents, setDocuments] = useState<Document[]>(mockDocuments);
+  const [selectedDocs, setSelectedDocs] = useState<Record<string, boolean>>({});
+  const [isStartApprovalOpen, setIsStartApprovalOpen] = useState(false);
+  const [selectedProcessId, setSelectedProcessId] = useState<string | undefined>(undefined);
 
-  const filteredDocuments = mockDocuments.filter(doc => {
+  const [availableProcesses, setAvailableProcesses] = useState<Array<{ id: string; name: string; steps: number }>>([]);
+  useEffect(() => {
+    listAccessibleProcessesForCompany(currentUser.company).then(list => {
+      setAvailableProcesses(list.filter(p => p.status === 'active' && !p.isTemplate));
+    });
+  }, [currentUser.company]);
+
+  const filteredDocuments = documents.filter(doc => {
     const matchesSearch = doc.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
                          doc.author.toLowerCase().includes(searchTerm.toLowerCase()) ||
                          doc.tags.some(tag => tag.toLowerCase().includes(searchTerm.toLowerCase()));
@@ -237,12 +251,42 @@ export default function Documents() {
   };
 
   const stats = {
-    total: mockDocuments.length,
-    draft: mockDocuments.filter(d => d.status === 'draft').length,
-    onApproval: mockDocuments.filter(d => d.status === 'on-approval').length,
-    approved: mockDocuments.filter(d => d.status === 'approved').length,
+    total: documents.length,
+    draft: documents.filter(d => d.status === 'draft').length,
+    onApproval: documents.filter(d => d.status === 'on-approval').length,
+    approved: documents.filter(d => d.status === 'approved').length,
     folders: mockFolders.length
   };
+
+  const toggleSelectDoc = (id: string, checked: boolean) => {
+    setSelectedDocs(prev => ({ ...prev, [id]: checked }));
+  };
+
+  const startApproval = () => {
+    if (!selectedProcessId) return;
+    const proc = availableProcesses.find(p => p.id === selectedProcessId);
+    if (!proc) return;
+    setDocuments(prev => prev.map(d => selectedDocs[d.id] ? {
+      ...d,
+      status: 'on-approval',
+      processInfo: { processId: proc.id, processName: proc.name, currentStep: 1, totalSteps: proc.steps }
+    } : d));
+    setIsStartApprovalOpen(false);
+    setSelectedProcessId(undefined);
+    setSelectedDocs({});
+  };
+
+  // Автопрогресс шагов (демо)
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setDocuments(prev => prev.map(d => (
+        d.status === 'on-approval' && d.processInfo && d.processInfo.currentStep < d.processInfo.totalSteps
+          ? { ...d, processInfo: { ...d.processInfo, currentStep: d.processInfo.currentStep + 1 } }
+          : d
+      )));
+    }, 6000);
+    return () => clearInterval(timer);
+  }, []);
 
   return (
     <Layout>
@@ -489,6 +533,9 @@ export default function Documents() {
                             {statusInfo.label}
                           </Badge>
                           <Badge variant="outline">{doc.type}</Badge>
+                          {doc.status === 'on-approval' && doc.processInfo && (
+                            <Badge variant="secondary">На согласовании по процессу — {doc.processInfo.processName}. Текущий шаг: {doc.processInfo.currentStep}</Badge>
+                          )}
                         </div>
 
                         {doc.description && (
@@ -553,12 +600,15 @@ export default function Documents() {
 
                       {/* Actions */}
                       <div className="flex flex-col space-y-2 ml-6">
-                        <Link to={`/documents/${doc.id}`}>
+                        <div className="flex items-center space-x-2">
+                          <Checkbox checked={!!selectedDocs[doc.id]} onCheckedChange={(v) => toggleSelectDoc(doc.id, Boolean(v))} />
+                          <Link to={`/documents/${doc.id}`}>
                           <Button variant="outline" size="sm">
                             <Eye className="w-4 h-4 mr-2" />
                             Просмотр
                           </Button>
-                        </Link>
+                          </Link>
+                        </div>
                         <Button variant="outline" size="sm">
                           <Download className="w-4 h-4 mr-2" />
                           Скачать
@@ -575,6 +625,41 @@ export default function Documents() {
                 </Card>
               );
             })}
+            {Object.values(selectedDocs).some(Boolean) && (
+              <div className="sticky bottom-4 flex justify-end">
+                <Dialog open={isStartApprovalOpen} onOpenChange={setIsStartApprovalOpen}>
+                  <DialogTrigger asChild>
+                    <Button className="bg-blue-600 hover:bg-blue-700">
+                      Согласовать выбранные
+                    </Button>
+                  </DialogTrigger>
+                  <DialogContent className="max-w-md">
+                    <DialogHeader>
+                      <DialogTitle>Запуск процесса согласования</DialogTitle>
+                    </DialogHeader>
+                    <div className="space-y-4">
+                      <div>
+                        <Label>Процесс согласования</Label>
+                        <Select value={selectedProcessId} onValueChange={setSelectedProcessId}>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Выберите процесс" />
+                          </SelectTrigger>
+                          <SelectContent className="w-[--radix-select-trigger-width]">
+                            {availableProcesses.map(p => (
+                              <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="flex justify-end space-x-2">
+                        <Button variant="outline" onClick={() => setIsStartApprovalOpen(false)}>Отмена</Button>
+                        <Button onClick={startApproval} disabled={!selectedProcessId}>Запустить</Button>
+                      </div>
+                    </div>
+                  </DialogContent>
+                </Dialog>
+              </div>
+            )}
           </div>
         )}
 

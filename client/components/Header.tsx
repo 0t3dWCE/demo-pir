@@ -1,4 +1,5 @@
 import { useRole, defaultUsers, UserRole } from '../contexts/RoleContext';
+import { extraUsers } from '../contexts/RoleContext';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Button } from '@/components/ui/button';
 import { Bell, FileText, Building2, Users, List, BarChart } from 'lucide-react';
@@ -16,9 +17,7 @@ const roleLabels: Record<UserRole, string> = {
 const navigationConfig: Record<UserRole, Array<{ label: string; href: string; icon: any }>> = {
   'root-admin': [
     { label: 'Объекты', href: '/objects', icon: Building2 },
-    { label: 'Организации', href: '/organizations', icon: Users },
-    { label: 'Договоры', href: '/contracts', icon: FileText },
-    { label: 'Мониторинг', href: '/monitoring', icon: BarChart }
+    { label: 'Организации', href: '/organizations', icon: Users }
   ],
   'company-admin': [
     { label: 'Объекты', href: '/objects', icon: Building2 },
@@ -54,8 +53,28 @@ export default function Header() {
 
   const navigation = navigationConfig[currentUser.role] || [];
 
-  const handleRoleChange = (role: UserRole) => {
-    setCurrentUser(defaultUsers[role]);
+  const buildValue = (u: { role: UserRole; name: string; company?: string }) => `${u.role}|${u.name}|${u.company || ''}`;
+  const parseValue = (val: string): { role: UserRole; name: string; company?: string } => {
+    const [role, name, company] = val.split('|');
+    return { role: role as UserRole, name, company };
+  };
+
+  const handleRoleChange = (value: string) => {
+    const { role, name, company } = parseValue(value);
+    // попробовать найти точное совпадение среди дефолтных
+    const def = defaultUsers[role];
+    if (def && def.name === name && (def.company || '') === (company || '')) {
+      setCurrentUser(def);
+      return;
+    }
+    // иначе ищем среди дополнительных
+    const extra = extraUsers.find(u => u.roleKey === role && u.name === name && (u.company || '') === (company || ''));
+    if (extra) {
+      setCurrentUser({ name: extra.name, role: extra.roleKey, email: extra.email, company: extra.company });
+      return;
+    }
+    // по умолчанию — дефолтный пользователь роли
+    setCurrentUser(def || currentUser);
   };
 
   return (
@@ -63,16 +82,29 @@ export default function Header() {
       {/* Role Switcher */}
       <div className="bg-gray-50 border-b border-gray-200 px-6 py-2">
         <div className="flex items-center justify-between">
-          <Select value={currentUser.role} onValueChange={handleRoleChange}>
-            <SelectTrigger className="w-64 text-sm">
+          <Select value={buildValue(currentUser)} onValueChange={handleRoleChange}>
+            <SelectTrigger className="w-96 text-sm">
               <SelectValue />
             </SelectTrigger>
-            <SelectContent className="w-64">
-              {Object.entries(roleLabels).map(([role, label]) => (
-                <SelectItem key={role} value={role}>
-                  {label}
-                </SelectItem>
-              ))}
+            <SelectContent className="w-96">
+              {Object.entries(roleLabels).map(([role, label]) => {
+                const user = defaultUsers[role as UserRole];
+                const value = buildValue(user);
+                return (
+                  <SelectItem key={role} value={value}>
+                    {`${label} — ${user.name} — ${user.company || '—'}`}
+                  </SelectItem>
+                );
+              })}
+              <div className="px-2 py-1 text-xs text-gray-500">Доп. пользователи</div>
+              {extraUsers.map((u) => {
+                const value = buildValue({ role: u.roleKey, name: u.name, company: u.company });
+                return (
+                  <SelectItem key={u.key} value={value}>
+                    {`${roleLabels[u.roleKey]} — ${u.name} — ${u.company}`}
+                  </SelectItem>
+                );
+              })}
             </SelectContent>
           </Select>
           <div className="text-sm text-gray-600">

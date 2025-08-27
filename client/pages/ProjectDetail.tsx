@@ -5,8 +5,11 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { getProjectMeta } from '../../shared/api';
+import { getProjectMeta, listAccessibleProcessesForCompany } from '../../shared/api';
 import {
   FileText,
   Upload,
@@ -117,6 +120,11 @@ export default function ProjectDetail() {
   const [selectedFolder, setSelectedFolder] = useState('07 - ПД (Проектная документация)');
   const [activeTab, setActiveTab] = useState('documents');
   const [projectName, setProjectName] = useState<string>('Объект');
+  const [folderDocuments, setFolderDocuments] = useState<any[]>(mockDocuments);
+  const [selectedDocs, setSelectedDocs] = useState<Record<string, boolean>>({});
+  const [isStartApprovalOpen, setIsStartApprovalOpen] = useState(false);
+  const [selectedProcessId, setSelectedProcessId] = useState<string | undefined>(undefined);
+  const [availableProcesses, setAvailableProcesses] = useState<Array<{ id: string; name: string; steps: number }>>([]);
   const projectInlineStatus = getInlineStatusLabelAndColor(mockProject.status, mockProject.deadline, mockProject.progress);
 
   // Автоматически выбираем папку из URL параметров при загрузке
@@ -135,6 +143,12 @@ export default function ProjectDetail() {
     const meta = getProjectMeta(id);
     if (meta?.name) setProjectName(meta.name);
   }, [id]);
+
+  useEffect(() => {
+    listAccessibleProcessesForCompany(undefined).then(list => {
+      setAvailableProcesses(list.filter(p => p.status === 'active' && !p.isTemplate));
+    });
+  }, []);
 
   return (
     <Layout>
@@ -288,9 +302,45 @@ export default function ProjectDetail() {
                       <Upload className="w-4 h-4 mr-2" />
                       Загрузить
                     </Button>
-                    <Button variant="outline" size="sm">
-                      Согласовать выбранные
-                    </Button>
+                    <Dialog open={isStartApprovalOpen} onOpenChange={setIsStartApprovalOpen}>
+                      <DialogTrigger asChild>
+                        <Button variant="outline" size="sm">
+                          Согласовать выбранные
+                        </Button>
+                      </DialogTrigger>
+                      <DialogContent className="max-w-md">
+                        <DialogHeader>
+                          <DialogTitle>Запуск процесса согласования</DialogTitle>
+                        </DialogHeader>
+                        <div className="space-y-4">
+                          <div>
+                            <span className="block text-sm text-gray-600 mb-1">Процесс согласования</span>
+                            <Select value={selectedProcessId} onValueChange={setSelectedProcessId}>
+                              <SelectTrigger>
+                                <SelectValue placeholder="Выберите процесс" />
+                              </SelectTrigger>
+                              <SelectContent className="w-[--radix-select-trigger-width]">
+                                {availableProcesses.map(p => (
+                                  <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <div className="flex justify-end space-x-2">
+                            <Button variant="outline" onClick={() => setIsStartApprovalOpen(false)}>Отмена</Button>
+                            <Button onClick={() => {
+                              if (!selectedProcessId) return;
+                              const proc = availableProcesses.find(p => p.id === selectedProcessId);
+                              if (!proc) return;
+                              setFolderDocuments(prev => prev.map(d => selectedDocs[d.id] ? ({ ...d, status: 'on-approval', processInfo: { processId: proc.id, processName: proc.name, currentStep: 1, totalSteps: proc.steps } }) : d));
+                              setIsStartApprovalOpen(false);
+                              setSelectedDocs({});
+                              setSelectedProcessId(undefined);
+                            }} disabled={!selectedProcessId}>Запустить</Button>
+                          </div>
+                        </div>
+                      </DialogContent>
+                    </Dialog>
                   </div>
                 </div>
               </CardHeader>
@@ -302,14 +352,14 @@ export default function ProjectDetail() {
 
                   <TabsContent value="documents" className="mt-6">
                     <div className="space-y-4">
-                      {mockDocuments.map((doc) => {
+                      {folderDocuments.map((doc) => {
                         const statusInfo = statusConfig[doc.status];
                         const StatusIcon = statusInfo.icon;
                         
                         return (
                           <div key={doc.id} className="flex items-center justify-between p-4 border border-gray-200 rounded-lg hover:bg-gray-50">
                             <div className="flex items-center space-x-4">
-                              <input type="checkbox" className="rounded" />
+                              <Checkbox checked={!!selectedDocs[doc.id]} onCheckedChange={(v) => setSelectedDocs(prev => ({ ...prev, [doc.id]: Boolean(v) }))} />
                               <FileText className="w-5 h-5 text-gray-400" />
                               <div>
                                 <div className="font-medium">{doc.name}</div>
@@ -323,6 +373,9 @@ export default function ProjectDetail() {
                                 <StatusIcon className="w-3 h-3 mr-1" />
                                 {statusInfo.label}
                               </Badge>
+                              {doc.status === 'on-approval' && (doc as any).processInfo && (
+                                <Badge variant="secondary">На согласовании по процессу — {(doc as any).processInfo.processName}. Текущий шаг: {(doc as any).processInfo.currentStep}</Badge>
+                              )}
                               {doc.comments > 0 && (
                                 <div className="flex items-center text-sm text-gray-500">
                                   <MessageSquare className="w-4 h-4 mr-1" />
