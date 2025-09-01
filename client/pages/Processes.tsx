@@ -234,11 +234,23 @@ export default function Processes() {
   const [creationOption, setCreationOption] = useState<'new' | 'template' | 'copy'>('new');
   const [selectedTemplateId, setSelectedTemplateId] = useState<string | undefined>(undefined);
   const [selectedCopyId, setSelectedCopyId] = useState<string | undefined>(undefined);
-  const [createType, setCreateType] = useState<'approval' | 'review' | 'custom' | ''>('');
+  const [createType, setCreateType] = useState<string>('');
   const [createStepsCount, setCreateStepsCount] = useState<number>(2);
   const [createName, setCreateName] = useState<string>('');
   const [createDescription, setCreateDescription] = useState<string>('');
   const [createProject, setCreateProject] = useState<string | undefined>(undefined);
+
+  // Дополнительные предустановленные типы из требований (для выпадалки создания)
+  const extraProcessTypes: Array<{ value: string; label: string }> = [
+    { value: 'task_rd_check_outside', label: 'Задание на проверку РД в ТО вне процесса' },
+    { value: 'task_put_stamp_v_proizvodstvo', label: 'Задание на постановку штампа «В производство работ»' },
+    { value: 'approval_rd_ofkhp_to', label: 'Процесс согласования РД в ОФКХП и ТО' },
+    { value: 'approval_crp', label: 'Процесс согласования ЦРП' },
+    { value: 'approval_crp_business', label: 'Процесс согласования ЦРП (ЖК Бизнес Класса)' },
+    { value: 'approval_crp_comfort', label: 'Процесс согласования ЦРП (ЖК Комфорт Класса)' },
+    { value: 'approval_crp_landscape_business', label: 'Процесс согласования ЦРП с ландшафтным дизайнером (ЖК Бизнес-класса)' },
+    { value: 'approval_crp_landscape_comfort', label: 'Процесс согласования ЦРП с ландшафтным дизайнером (ЖК Комфорт класса)' }
+  ];
 
   const initialStepsMap: Record<string, ProcessStep[]> = {
     'proc-1': mockSteps,
@@ -307,11 +319,17 @@ export default function Processes() {
       stepsForProcess = [];
     }
 
+    // Маппим выбранный тип из выпадалки к базовому типу процесса
+    const baseType: 'approval' | 'review' | 'custom' =
+      createType === 'approval' || createType === 'review' || createType === 'custom'
+        ? (createType as 'approval' | 'review' | 'custom')
+        : 'custom';
+
     const newProcess: Process = {
       id,
       name: createName || 'Новый процесс',
       description: createDescription || '',
-      type: (sourceProcess?.type || createType || 'approval') as 'approval' | 'review' | 'custom',
+      type: sourceProcess?.type || baseType,
       status: 'draft',
       steps: stepsForProcess.length,
       projectsCount: createProject ? 1 : 0,
@@ -577,14 +595,18 @@ export default function Processes() {
                   <div className="grid grid-cols-2 gap-4">
                     <div>
                       <Label htmlFor="processType">Тип рабочего процесса *</Label>
-                      <Select value={createType} onValueChange={(v: 'approval' | 'review' | 'custom') => setCreateType(v)}>
+                      <Select value={createType} onValueChange={(v) => setCreateType(v)}>
                         <SelectTrigger>
                           <SelectValue placeholder="Выберите тип" />
                         </SelectTrigger>
                         <SelectContent className="w-[--radix-select-trigger-width]">
-                          <SelectItem value="approval">Согласование документов</SelectItem>
+                          {/* <SelectItem value="approval">Согласование документов</SelectItem>
                           <SelectItem value="review">Рассмотрение и проверка</SelectItem>
-                          <SelectItem value="custom">Специализированный</SelectItem>
+                          <SelectItem value="custom">Специализированный</SelectItem> */}
+                          {/* Доп. типы из перечня */}
+                          {extraProcessTypes.map(t => (
+                            <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>
+                          ))}
                         </SelectContent>
                       </Select>
                     </div>
