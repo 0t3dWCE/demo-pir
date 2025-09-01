@@ -87,7 +87,7 @@ export default function Header() {
               <SelectValue />
             </SelectTrigger>
             <SelectContent className="w-96">
-              {Object.entries(roleLabels).filter(([role]) => role !== 'project-manager').map(([role, label]) => {
+              {Object.entries(roleLabels).filter(([role]) => role !== 'project-manager' && role !== 'reviewer').map(([role, label]) => {
                 const user = defaultUsers[role as UserRole];
                 const value = buildValue(user);
                 return (
@@ -97,7 +97,7 @@ export default function Header() {
                 );
               })}
               <div className="px-2 py-1 text-xs text-gray-500">Доп. пользователи</div>
-              {extraUsers.map((u) => {
+              {extraUsers.filter((u) => u.roleKey !== 'reviewer').map((u) => {
                 const value = buildValue({ role: u.roleKey, name: u.name, company: u.company });
                 return (
                   <SelectItem key={u.key} value={value}>
