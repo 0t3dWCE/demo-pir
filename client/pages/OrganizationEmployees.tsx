@@ -243,7 +243,7 @@ export default function OrganizationEmployees() {
   const [externalSearchTerm, setExternalSearchTerm] = useState('');
   const [selectedEmployees, setSelectedEmployees] = useState<string[]>([]);
   const [activeTab, setActiveTab] = useState('employees');
-  const [showSyncNeeded, setShowSyncNeeded] = useState(true);
+  const [showSyncNeeded, setShowSyncNeeded] = useState(false);
 
   const filteredEmployees = mockEmployees.filter(emp => {
     const matchesSearch = emp.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -528,9 +528,7 @@ export default function OrganizationEmployees() {
                 const sourceInfo = sourceConfig[employee.source];
                 const StatusIcon = statusInfo.icon;
                 const SourceIcon = sourceInfo.icon;
-                const needsSync = employee.source === 'my-company' && 
-                                 employee.lastSync && 
-                                 new Date(employee.lastSync) < new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+                const needsSync = false;
 
                 return (
                   <Card key={employee.id} className="hover:shadow-lg transition-shadow">
@@ -569,12 +567,7 @@ export default function OrganizationEmployees() {
                               <SourceIcon className="w-3 h-3 mr-1" />
                               {sourceInfo.label}
                             </Badge>
-                            {needsSync && (
-                              <Badge variant="destructive">
-                                <RefreshCw className="w-3 h-3 mr-1" />
-                                Требует синхронизации
-                              </Badge>
-                            )}
+                            {/* Плашка синхронизации скрыта */}
                           </div>
 
                           <p className="text-gray-600 mb-3">{employee.position}</p>

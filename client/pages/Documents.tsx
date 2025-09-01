@@ -592,11 +592,11 @@ export default function Documents() {
                           </div>
                         </div>
 
-                        {doc.tags.length > 0 && (
+                        {Array.isArray((doc as any).tags) && (doc as any).tags.length > 0 && (
                           <div>
                             <div className="text-sm font-medium text-gray-500 mb-2">Теги:</div>
                             <div className="flex flex-wrap gap-2">
-                              {doc.tags.map((tag, index) => (
+                              {(doc as any).tags.map((tag: string, index: number) => (
                                 <Badge key={index} variant="secondary" className="text-xs">
                                   {tag}
                                 </Badge>

@@ -221,8 +221,6 @@ export default function Organizations() {
 
   const stats = {
     total: organizations.length,
-    active: organizations.filter(org => org.status === 'active').length,
-    pending: organizations.filter(org => org.status === 'pending').length,
     totalEmployees: organizations.reduce((sum, org) => sum + org.employeeCount, 0)
   };
 
@@ -335,17 +333,7 @@ export default function Organizations() {
                     />
                   </div>
                   
-                  <Select value={statusFilter} onValueChange={setStatusFilter}>
-                    <SelectTrigger className="w-48">
-                      <SelectValue placeholder="Все статусы" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">Все статусы</SelectItem>
-                      <SelectItem value="active">Активные</SelectItem>
-                      <SelectItem value="inactive">Неактивные</SelectItem>
-                      <SelectItem value="pending">На рассмотрении</SelectItem>
-                    </SelectContent>
-                  </Select>
+                  {/* Статусы скрыты для рут-админа */}
 
                   <Select value={typeFilter} onValueChange={setTypeFilter}>
                     <SelectTrigger className="w-48">
@@ -366,8 +354,7 @@ export default function Organizations() {
             {/* Organizations List */}
             <div className="space-y-4">
               {filteredOrganizations.map((org) => {
-                const statusInfo = statusConfig[org.status];
-                const StatusIcon = statusInfo.icon;
+                // статусные бейджи скрываем
 
                 return (
                   <Card key={org.id} className="hover:shadow-lg transition-shadow">
@@ -377,10 +364,7 @@ export default function Organizations() {
                           <div className="flex items-center space-x-3 mb-3">
                             <Building className="w-6 h-6 text-gray-400" />
                             <h3 className="text-xl font-semibold">{org.name}</h3>
-                            <Badge className={`${statusInfo.color} text-white`}>
-                              <StatusIcon className="w-3 h-3 mr-1" />
-                              {statusInfo.label}
-                            </Badge>
+                            {/* Бейдж статуса скрыт */}
                             <Badge variant="outline">{org.type}</Badge>
                           </div>
 
