@@ -95,7 +95,7 @@ export default function Approval() {
         <div>
           <h1 className="text-3xl font-bold text-gray-900">Согласование документов</h1>
           <p className="text-gray-600 mt-1">
-            Документы, ожидающие вашего согласовани��
+            Документы, ожидающие вашего согласования
           </p>
         </div>
 
