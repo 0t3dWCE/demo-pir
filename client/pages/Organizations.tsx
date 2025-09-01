@@ -125,7 +125,7 @@ const mockExternalOrganizations = [
     ogrn: '1067845678901',
     director: 'Волкова Елена Петровна',
     employeeCount: 18,
-    activityTypes: ['Конструктивные решения', 'Техно��огические решения'],
+    activityTypes: ['Конструктивные решения', 'Технологические решения'],
     isExternal: true
   }
 ];

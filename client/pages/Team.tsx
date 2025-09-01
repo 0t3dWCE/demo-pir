@@ -166,7 +166,7 @@ const mockEmployees: Employee[] = [
       {
         contractId: 'contract-1',
         contractName: 'ДП-2024-001',
-        projectName: 'ЖК «Сев��рный парк»',
+        projectName: 'ЖК «Северный парк»',
         roles: ['reviewer'],
         status: 'active',
         startDate: '2024-01-15',
@@ -427,7 +427,7 @@ export default function Team() {
                   <AlertCircle className="w-5 h-5 text-yellow-600" />
                   <div>
                     <div className="font-medium text-yellow-800">
-                      Требуется синхрониз��ция
+                      Требуется синхронизация
                     </div>
                     <div className="text-sm text-yellow-700">
                       {syncNeededEmployees.length} сотрудников не синхронизированы с системой "Моя компания" более 7 дней

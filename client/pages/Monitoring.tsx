@@ -495,7 +495,7 @@ export default function Monitoring() {
                 <Database className="w-12 h-12 mx-auto mb-4 text-gray-300" />
                 <h3 className="text-lg font-medium text-gray-900 mb-2">Журнал событий</h3>
                 <p className="text-gray-500">
-                  Детальный лог всех операций интеграции с временными метками, ко��ами ответов и деталями ошибок
+                  Детальный лог всех операций интеграции с временными метками, кодами ответов и деталями ошибок
                 </p>
               </CardContent>
             </Card>

@@ -210,7 +210,7 @@ export default function ProjectDetail() {
               </Button>
               <Button>
                 <Upload className="w-4 h-4 mr-2" />
-                Загрузить докумен��ы
+                Загрузить документы
               </Button>
             </div>
           </div>

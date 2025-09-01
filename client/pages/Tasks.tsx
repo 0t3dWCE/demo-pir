@@ -717,7 +717,7 @@ export default function Tasks() {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="all">Все проекты</SelectItem>
-                      <SelectItem value="Северный">ЖК «Север��ый парк»</SelectItem>
+                      <SelectItem value="Северный">ЖК «Северный парк»</SelectItem>
                       <SelectItem value="Технологический">БЦ «Технологический»</SelectItem>
                       <SelectItem value="Галерея">ТРК «Галерея»</SelectItem>
                     </SelectContent>

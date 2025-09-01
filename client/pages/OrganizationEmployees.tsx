@@ -192,7 +192,7 @@ const mockEmployees: Employee[] = [
         endDate: '2024-11-30'
       }
     ],
-    projects: ['БЦ «Технологиче��кий»']
+    projects: ['БЦ «Технологический»']
   }
 ];
 
@@ -456,7 +456,7 @@ export default function OrganizationEmployees() {
                   <div className="flex-1 relative">
                     <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
                     <Input
-                      placeholder="Поиск сотрудник��в..."
+                      placeholder="Поиск сотрудников..."
                       value={searchTerm}
                       onChange={(e) => setSearchTerm(e.target.value)}
                       className="pl-10"

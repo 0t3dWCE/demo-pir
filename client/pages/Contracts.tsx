@@ -111,7 +111,7 @@ const mockContracts: Contract[] = [
     documentCount: 124,
     lastUpdate: '2024-01-20',
     responsiblePerson: 'Петр Иванов',
-    description: 'Проектирование жилого комплекс�� премиум-класса, включая архитектурные и инженерные решения'
+    description: 'Проектирование жилого комплекса премиум-класса, включая архитектурные и инженерные решения'
   },
   {
     id: 'contract-2',
@@ -144,7 +144,7 @@ const mockContracts: Contract[] = [
     documentCount: 89,
     lastUpdate: '2024-01-18',
     responsiblePerson: 'Анна Сидорова',
-    description: 'Проектирование офисного центра класса А с с��временными инженерными системами'
+    description: 'Проектирование офисного центра класса А с современными инженерными системами'
   },
   {
     id: 'contract-3',
@@ -176,14 +176,14 @@ const mockContracts: Contract[] = [
     employeeCount: 4,
     documentCount: 156,
     lastUpdate: '2024-01-31',
-    responsiblePerson: 'Михаил Козл��в',
+    responsiblePerson: 'Михаил Козлов',
     description: 'Государственная экспертиза проектной документации торгово-развлекательного комплекса'
   },
   {
     id: 'contract-4',
     number: 'ДП-2024-003',
     name: 'Доп. соглашение к ДП-2024-001',
-    projectName: 'ЖК «Северный ��арк»',
+    projectName: 'ЖК «Северный Парк»',
     projectId: 'project-1',
     customer: {
       id: 'org-customer',
@@ -259,7 +259,7 @@ const statusConfig = {
 const typeConfig = {
   'main': { label: 'Основной', color: 'bg-blue-500' },
   'amendment': { label: 'Доп. соглашение', color: 'bg-purple-500' },
-  'appendix': { label: 'Прил��жение', color: 'bg-orange-500' }
+  'appendix': { label: 'Приложение', color: 'bg-orange-500' }
 };
 
 const roleConfig = {
@@ -805,7 +805,7 @@ export default function Contracts() {
                   
                   <Select value={statusFilter} onValueChange={setStatusFilter}>
                     <SelectTrigger className="w-48">
-                      <SelectValue placeholder="Все с��атусы" />
+                      <SelectValue placeholder="Все статусы" />
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="all">Все статусы</SelectItem>

@@ -119,7 +119,7 @@ export default function Index() {
       id: 'ext-obj-2',
       name: 'БЦ «Инновация Плаза»',
       description: 'Современный бизнес-центр класса А',
-      location: 'г. Санк��-Петербург, Центральный район',
+      location: 'г. Санкт-Петербург, Центральный район',
       type: 'Коммерческое строительство',
       area: '25000 м²',
       floors: 12,
@@ -363,7 +363,7 @@ export default function Index() {
               <SelectItem value="all">Все статусы</SelectItem>
               <SelectItem value="draft">Черновик</SelectItem>
               <SelectItem value="in-progress">В работе</SelectItem>
-              <SelectItem value="on-approval">На со��ласовании</SelectItem>
+              <SelectItem value="on-approval">На согласовании</SelectItem>
               <SelectItem value="approved">Согласован</SelectItem>
               <SelectItem value="rejected">Отклонен</SelectItem>
             </SelectContent>

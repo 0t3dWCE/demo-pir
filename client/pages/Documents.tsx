@@ -682,7 +682,7 @@ export default function Documents() {
         {viewMode === 'documents' && filteredDocuments.length === 0 && (
           <div className="text-center py-12">
             <FileText className="w-12 h-12 mx-auto mb-4 text-gray-300" />
-            <p className="text-gray-500">Доку��енты не найдены</p>
+            <p className="text-gray-500">Документы не найдены</p>
           </div>
         )}
       </div>
