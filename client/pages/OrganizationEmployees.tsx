@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import Layout from '../components/Layout';
 import { Button } from '@/components/ui/button';
@@ -9,6 +9,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Checkbox } from '@/components/ui/checkbox';
+import { getObjectFolderPaths, getCompanyStructure, getCompanyUnitPaths } from '../../shared/api';
 import {
   Search,
   Plus,
@@ -45,6 +46,7 @@ interface Employee {
   contractRoles: ContractRole[];
   projects: string[];
   avatar?: string;
+  departmentPath?: string;
 }
 
 interface ContractRole {
@@ -237,23 +239,89 @@ export default function OrganizationEmployees() {
   const { id } = useParams();
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
-  const [sourceFilter, setSourceFilter] = useState('all');
-  const [projectFilter, setProjectFilter] = useState('all');
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [externalSearchTerm, setExternalSearchTerm] = useState('');
   const [selectedEmployees, setSelectedEmployees] = useState<string[]>([]);
   const [activeTab, setActiveTab] = useState('employees');
+  const [rolesActiveEmployeeId, setRolesActiveEmployeeId] = useState<string | null>(null);
   const [showSyncNeeded, setShowSyncNeeded] = useState(false);
+
+  // Роли как на странице Команды (повторяем логику)
+  type RoleKey = 'signatory' | 'reviewer' | 'observer' | 'editor' | 'deleter';
+  const [roleAssignments, setRoleAssignments] = useState<Record<string, { roleFolders: Record<RoleKey, string[]> }>>({});
+  const [openPickers, setOpenPickers] = useState<Record<string, boolean>>({});
+  const [allFolders] = useState<string[]>(getObjectFolderPaths());
+  const [companyUnits, setCompanyUnits] = useState<Array<{ name: string; children?: any[] }>>([]);
+  const [selectedUnitPath, setSelectedUnitPath] = useState<string | null>(null);
+  const [showAllCompanyEmployees, setShowAllCompanyEmployees] = useState<boolean>(false);
+
+  // Заполним структуру подразделений компании и раздадим сотрудникам отделы
+  useEffect(() => {
+    const inn = id || '7812345678';
+    const units = getCompanyStructure(inn);
+    setCompanyUnits(units);
+    const paths = getCompanyUnitPaths(inn);
+    // разнесём сотрудников по отделам для демонстрации
+    const withDepts = mockEmployees.map((e, idx) => ({ ...e, departmentPath: paths[idx % Math.max(paths.length, 1)] }));
+    // инициализация ролей
+    const initial: Record<string, { roleFolders: Record<RoleKey, string[]> }> = {};
+    withDepts.forEach(e => { initial[e.id] = { roleFolders: { observer: ['Все папки'] } as Record<RoleKey, string[]> }; });
+    setRoleAssignments(initial);
+  }, [id]);
 
   const filteredEmployees = mockEmployees.filter(emp => {
     const matchesSearch = emp.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
                          emp.position.toLowerCase().includes(searchTerm.toLowerCase()) ||
                          emp.email.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesStatus = statusFilter === 'all' || emp.status === statusFilter;
-    const matchesSource = sourceFilter === 'all' || emp.source === sourceFilter;
-    const matchesProject = projectFilter === 'all' || emp.projects.some(p => p.includes(projectFilter));
-    return matchesSearch && matchesStatus && matchesSource && matchesProject;
+    return matchesSearch && matchesStatus;
   });
+
+  const togglePickerOpen = (empId: string, role: RoleKey) => {
+    const key = `${empId}:${role}`;
+    setOpenPickers((prev) => ({ ...prev, [key]: !prev[key] }));
+  };
+
+  const toggleRole = (empId: string, role: RoleKey, checked: boolean) => {
+    setRoleAssignments((prev) => {
+      const current = prev[empId] || { roleFolders: {} as Record<RoleKey, string[]> };
+      const roleFolders = { ...(current.roleFolders || {}) } as Record<RoleKey, string[]>;
+      if (checked) {
+        roleFolders[role] = ['Все папки'];
+      } else {
+        delete roleFolders[role];
+      }
+      return { ...prev, [empId]: { roleFolders } };
+    });
+  };
+
+  const toggleFolderForRole = (empId: string, role: RoleKey, folder: string, checked: boolean) => {
+    setRoleAssignments((prev) => {
+      const current = prev[empId] || { roleFolders: {} as Record<RoleKey, string[]> };
+      const roleFolders = { ...(current.roleFolders || {}) } as Record<RoleKey, string[]>;
+      const existing = new Set(roleFolders[role] || []);
+      if (folder === 'Все папки') {
+        if (checked) roleFolders[role] = ['Все папки']; else delete roleFolders[role];
+        return { ...prev, [empId]: { roleFolders } };
+      }
+      if (checked) {
+        existing.delete('Все папки');
+        existing.add(folder);
+      } else {
+        existing.delete(folder);
+      }
+      const next = Array.from(existing);
+      if (next.length === 0) delete roleFolders[role]; else roleFolders[role] = next;
+      return { ...prev, [empId]: { roleFolders } };
+    });
+  };
+
+  const getRoleFoldersLabel = (empId: string, role: RoleKey): string => {
+    const folders = roleAssignments[empId]?.roleFolders?.[role];
+    if (!folders || folders.length === 0) return '';
+    if (folders.includes('Все папки')) return 'Все папки';
+    return folders.join(', ');
+  };
 
   const filteredExternalEmployees = mockExternalEmployees.filter(emp =>
     emp.name.toLowerCase().includes(externalSearchTerm.toLowerCase()) ||
@@ -281,13 +349,7 @@ export default function OrganizationEmployees() {
     setSelectedEmployees([]);
   };
 
-  const stats = {
-    total: mockEmployees.length,
-    active: mockEmployees.filter(emp => emp.status === 'active').length,
-    pending: mockEmployees.filter(emp => emp.status === 'pending').length,
-    needsSync: syncNeededEmployees.length,
-    withContracts: mockEmployees.filter(emp => emp.contractRoles.length > 0).length
-  };
+  // Статистические карточки скрыты на этой странице
 
   return (
     <Layout>
@@ -406,39 +468,7 @@ export default function OrganizationEmployees() {
           </Card>
         )}
 
-        {/* Statistics */}
-        <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
-          <Card>
-            <CardContent className="p-6">
-              <div className="text-2xl font-bold text-blue-600">{stats.total}</div>
-              <div className="text-sm text-gray-600">Всего сотрудников</div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="p-6">
-              <div className="text-2xl font-bold text-green-600">{stats.active}</div>
-              <div className="text-sm text-gray-600">Активных</div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="p-6">
-              <div className="text-2xl font-bold text-yellow-600">{stats.pending}</div>
-              <div className="text-sm text-gray-600">Ожидают подтверждения</div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="p-6">
-              <div className="text-2xl font-bold text-purple-600">{stats.withContracts}</div>
-              <div className="text-sm text-gray-600">С ролями в договорах</div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="p-6">
-              <div className="text-2xl font-bold text-orange-600">{stats.needsSync}</div>
-              <div className="text-sm text-gray-600">Требуют синхронизации</div>
-            </CardContent>
-          </Card>
-        </div>
+        {/* Statistics removed */}
 
         {/* Main Content */}
         <Tabs value={activeTab} onValueChange={setActiveTab}>
@@ -471,32 +501,9 @@ export default function OrganizationEmployees() {
                       <SelectItem value="all">Все статусы</SelectItem>
                       <SelectItem value="active">Активные</SelectItem>
                       <SelectItem value="inactive">Неактивные</SelectItem>
-                      <SelectItem value="pending">Ожидают подтверждения</SelectItem>
                     </SelectContent>
                   </Select>
-
-                  <Select value={sourceFilter} onValueChange={setSourceFilter}>
-                    <SelectTrigger className="w-48">
-                      <SelectValue placeholder="Все источники" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">Все источники</SelectItem>
-                      <SelectItem value="my-company">Моя компания</SelectItem>
-                      <SelectItem value="contract">Из договора</SelectItem>
-                      <SelectItem value="manual">Добавлен вручную</SelectItem>
-                    </SelectContent>
-                  </Select>
-
-                  <Select value={projectFilter} onValueChange={setProjectFilter}>
-                    <SelectTrigger className="w-48">
-                      <SelectValue placeholder="Все проекты" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">Все проекты</SelectItem>
-                      <SelectItem value="Северный">ЖК «Северный парк»</SelectItem>
-                      <SelectItem value="Технологический">БЦ «Технологический»</SelectItem>
-                    </SelectContent>
-                  </Select>
+                  {/* выпадайки Источники и Проекты убраны */}
                 </div>
 
                 {/* Bulk Actions */}
@@ -524,10 +531,7 @@ export default function OrganizationEmployees() {
             {/* Employees List */}
             <div className="space-y-4">
               {filteredEmployees.map((employee) => {
-                const statusInfo = statusConfig[employee.status];
-                const sourceInfo = sourceConfig[employee.source];
-                const StatusIcon = statusInfo.icon;
-                const SourceIcon = sourceInfo.icon;
+                const isActive = employee.status === 'active';
                 const needsSync = false;
 
                 return (
@@ -559,15 +563,9 @@ export default function OrganizationEmployees() {
                         <div className="flex-1">
                           <div className="flex items-center space-x-3 mb-2">
                             <h3 className="text-lg font-semibold">{employee.name}</h3>
-                            <Badge className={`${statusInfo.color} text-white`}>
-                              <StatusIcon className="w-3 h-3 mr-1" />
-                              {statusInfo.label}
+                            <Badge className={`${isActive ? 'bg-green-500' : 'bg-gray-500'} text-white`}>
+                              {isActive ? 'Активен' : 'Не активен'}
                             </Badge>
-                            <Badge className={`${sourceInfo.color} text-white`}>
-                              <SourceIcon className="w-3 h-3 mr-1" />
-                              {sourceInfo.label}
-                            </Badge>
-                            {/* Плашка синхронизации скрыта */}
                           </div>
 
                           <p className="text-gray-600 mb-3">{employee.position}</p>
@@ -636,20 +634,10 @@ export default function OrganizationEmployees() {
 
                         {/* Actions */}
                         <div className="flex flex-col space-y-2">
-                          <Button variant="outline" size="sm">
-                            <Edit className="w-4 h-4 mr-2" />
-                            Редактировать
-                          </Button>
-                          <Button variant="outline" size="sm">
+                          <Button variant="outline" size="sm" onClick={() => { setRolesActiveEmployeeId(employee.id); setShowAllCompanyEmployees(true); setActiveTab('roles'); }}>
                             <Shield className="w-4 h-4 mr-2" />
                             Роли
                           </Button>
-                          {employee.source === 'my-company' && (
-                            <Button variant="outline" size="sm">
-                              <RefreshCw className="w-4 h-4 mr-2" />
-                              Синхронизировать
-                            </Button>
-                          )}
                         </div>
                       </div>
                     </CardContent>
@@ -726,15 +714,140 @@ export default function OrganizationEmployees() {
           </TabsContent>
 
           <TabsContent value="roles" className="mt-6">
-            <Card>
-              <CardContent className="p-8 text-center">
-                <Shield className="w-12 h-12 mx-auto mb-4 text-gray-300" />
-                <h3 className="text-lg font-medium text-gray-900 mb-2">Управление ролями</h3>
-                <p className="text-gray-500">
-                  Здесь будет интерфейс для массового назначения и изменения ролей сотрудников в договорах
-                </p>
-              </CardContent>
-            </Card>
+            <div className="grid grid-cols-12 gap-6">
+              {/* Дерево подразделений */}
+              <div className="col-span-12 md:col-span-4 lg:col-span-3">
+                <Card>
+                  <CardContent className="p-4">
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="text-sm font-medium text-gray-500">Подразделения</div>
+                      <label className="flex items-center space-x-2 text-xs">
+                        <Checkbox checked={showAllCompanyEmployees} onCheckedChange={(v) => setShowAllCompanyEmployees(Boolean(v))} />
+                        <span>Показать всех</span>
+                      </label>
+                    </div>
+                    {!showAllCompanyEmployees && (
+                      <div className="max-h-[60vh] overflow-y-auto space-y-1">
+                        {(() => {
+                          const items: JSX.Element[] = [];
+                          const walk = (node: { name: string; children?: any[] }, prefix: string[], depth: number) => {
+                            const here = [...prefix, node.name];
+                            const path = here.join(' / ');
+                            items.push(
+                              <button
+                                key={path}
+                                className={`w-full text-left px-2 py-1 rounded hover:bg-gray-100 ${selectedUnitPath === path ? 'bg-gray-100 font-medium' : ''}`}
+                                onClick={() => setSelectedUnitPath(path)}
+                              >
+                                <span className="text-sm" style={{ paddingLeft: depth * 8 }}>{node.name}</span>
+                              </button>
+                            );
+                            node.children?.forEach((ch) => walk(ch, here, depth + 1));
+                          };
+                          companyUnits.forEach((root) => walk(root, [], 0));
+                          return items;
+                        })()}
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              </div>
+
+              {/* Список сотрудников с ролями */}
+              <div className="col-span-12 md:col-span-8 lg:col-span-9 space-y-4">
+                {filteredEmployees
+                  .filter(emp => {
+                    if (showAllCompanyEmployees) return true;
+                    if (!selectedUnitPath) return false;
+                    return (emp as Employee).departmentPath ? (emp as Employee).departmentPath!.startsWith(selectedUnitPath) : true;
+                  })
+                  .map((employee) => {
+                    const statusInfo = statusConfig[employee.status];
+                    const isPrimary = rolesActiveEmployeeId ? rolesActiveEmployeeId === employee.id : true;
+                    return (
+                      <Card key={employee.id} className="hover:shadow-lg transition-shadow">
+                        <CardContent className="p-6">
+                          <div className="flex items-start space-x-4">
+                            <div className="w-12 h-12 bg-blue-500 rounded-full flex items-center justify-center shrink-0">
+                              <span className="text-white font-medium">
+                                {employee.name.split(' ').map(n => n[0]).join('')}
+                              </span>
+                            </div>
+                            <div className={`flex-1 ${rolesActiveEmployeeId && !isPrimary ? 'opacity-60 pointer-events-none' : ''}`}>
+                              <div className="flex items-center space-x-3 mb-2">
+                                <h3 className="text-lg font-semibold">{employee.name}</h3>
+                                <Badge className={`${statusInfo.color} text-white`}>{statusInfo.label}</Badge>
+                                { (employee as Employee).departmentPath && (
+                                  <Badge variant="outline">{(employee as Employee).departmentPath}</Badge>
+                                )}
+                              </div>
+                              <div className="text-sm text-gray-600 mb-3">{employee.email} • {employee.phone}</div>
+
+                              <div className="grid grid-cols-1 gap-4">
+                                <div>
+                                  <div className="text-sm font-medium text-gray-500 mb-2">Роли</div>
+                                  <div className="space-y-3">
+                                    {(['signatory', 'reviewer', 'observer', 'editor', 'deleter'] as RoleKey[]).map((role) => {
+                                      const key = `${employee.id}:${role}`;
+                                      const enabled = Boolean(roleAssignments[employee.id]?.roleFolders?.[role]);
+                                      const label = getRoleFoldersLabel(employee.id, role);
+                                      return (
+                                        <div key={role}>
+                                          <div className="flex items-center space-x-2">
+                                            <Checkbox
+                                              checked={enabled}
+                                              onCheckedChange={(val) => toggleRole(employee.id, role, Boolean(val))}
+                                            />
+                                            <span className="text-sm capitalize">
+                                              {role === 'signatory' ? 'подписант' : role === 'reviewer' ? 'проверяющий' : role === 'observer' ? 'наблюдающий' : role === 'editor' ? 'редактирование' : 'чтение'}
+                                            </span>
+                                            {Boolean(roleAssignments[employee.id]?.roleFolders?.[role]) && (
+                                              <span className="text-xs text-gray-500">({label})</span>
+                                            )}
+                                            {Boolean(roleAssignments[employee.id]?.roleFolders?.[role]) && (
+                                              <button
+                                                type="button"
+                                                onClick={() => togglePickerOpen(employee.id, role)}
+                                                className="text-xs text-blue-600 ml-2 hover:underline"
+                                              >
+                                                Настроить папки
+                                              </button>
+                                            )}
+                                          </div>
+                                          {enabled && openPickers[key] && (
+                                            <div className="mt-2 ml-6 p-2 border rounded bg-gray-50 max-h-40 overflow-y-auto">
+                                              <label className="flex items-center space-x-2 mb-2">
+                                                <Checkbox
+                                                  checked={Boolean(roleAssignments[employee.id]?.roleFolders?.[role]?.includes('Все папки'))}
+                                                  onCheckedChange={(val) => toggleFolderForRole(employee.id, role, 'Все папки', Boolean(val))}
+                                                />
+                                                <span className="text-sm">Все папки</span>
+                                              </label>
+                                              {allFolders.map((p) => (
+                                                <label key={p} className="flex items-center space-x-2">
+                                                  <Checkbox
+                                                    checked={Boolean(roleAssignments[employee.id]?.roleFolders?.[role]?.includes(p))}
+                                                    onCheckedChange={(val) => toggleFolderForRole(employee.id, role, p, Boolean(val))}
+                                                  />
+                                                  <span className="text-sm">{p}</span>
+                                                </label>
+                                              ))}
+                                            </div>
+                                          )}
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    );
+                  })}
+              </div>
+            </div>
           </TabsContent>
         </Tabs>
 

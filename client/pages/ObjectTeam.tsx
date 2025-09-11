@@ -7,13 +7,15 @@ import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { getProjectCompanies, getProjectMeta, getEmployeesForCompanies, getObjectFolderPaths, getProjectEmployees, setProjectEmployees } from '../../shared/api';
+import { getProjectCompanies, getProjectMeta, getEmployeesForCompanies, getObjectFolderPaths, getProjectEmployees, setProjectEmployees, getProjectNewCompanies, clearProjectCompanyNewFlag, getCompanyStructure } from '../../shared/api';
 import { Users, ArrowLeft, Building2, Search } from 'lucide-react';
+import { useRole } from '../contexts/RoleContext';
 
 type RoleKey = 'signatory' | 'reviewer' | 'observer' | 'editor' | 'deleter';
 
 export default function ObjectTeam() {
   const { id } = useParams();
+  const { currentUser } = useRole();
   const [objectName, setObjectName] = useState<string>('');
   const [employees, setEmployees] = useState<Array<{
     id: string;
@@ -23,23 +25,51 @@ export default function ObjectTeam() {
     phone: string;
     companyInn: string;
     companyName: string;
+    isCompanyAdmin?: boolean;
+    departmentPath?: string;
   }>>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [roleAssignments, setRoleAssignments] = useState<Record<string, { roleFolders: Record<RoleKey, string[]> }>>({});
   const [allFolders] = useState<string[]>(getObjectFolderPaths());
+  const [activeEmployeeId, setActiveEmployeeId] = useState<string | null>(null);
   const [openPickers, setOpenPickers] = useState<Record<string, boolean>>({});
+  const [companies, setCompanies] = useState<{ inn: string; name: string; isNew: boolean }[]>([]);
+  const [selectedCompanyInn, setSelectedCompanyInn] = useState<string | null>(null);
+  const [companyUnits, setCompanyUnits] = useState<Array<{ name: string; children?: any[] }>>([]);
+  const [showAllEmployees, setShowAllEmployees] = useState<boolean>(false);
+  const [selectedUnitPath, setSelectedUnitPath] = useState<string | null>(null);
 
   useEffect(() => {
     if (!id) return;
     const meta = getProjectMeta(id);
     if (meta) setObjectName(meta.name);
     (async () => {
-      // сначала пытаемся взять кэш сотрудников, если есть; иначе генерируем по компаниям
+      // Компании и флаг "новая"
+      const comps = await getProjectCompanies(id);
+      const newInns = getProjectNewCompanies(id) || [];
+      const compList = comps.map(c => ({ inn: c.inn, name: c.name, isNew: newInns.includes(c.inn) }));
+      compList.sort((a, b) => Number(b.isNew) - Number(a.isNew) || a.name.localeCompare(b.name));
+      setCompanies(compList);
+      if (!selectedCompanyInn && compList[0]) {
+        // Выбор компании по умолчанию. Для администратора компании выбираем его компанию.
+        if (currentUser.role === 'company-admin') {
+          const target = compList.find(c => {
+            const a = (c.name || '').toLowerCase();
+            const b = (currentUser.company || '').toLowerCase();
+            return a.includes(b) || b.includes(a);
+          }) || compList[0];
+          setSelectedCompanyInn(target.inn);
+        } else {
+          setSelectedCompanyInn(compList[0].inn);
+        }
+      }
+
+      // Сотрудники (кэш или генерация)
       const cached = await getProjectEmployees(id);
       let emps = cached;
       if (!cached || cached.length === 0) {
-        const companies = await getProjectCompanies(id);
-        emps = await getEmployeesForCompanies(companies);
+        const companiesData = await getProjectCompanies(id);
+        emps = await getEmployeesForCompanies(companiesData);
         setProjectEmployees(id, emps);
       }
       setEmployees(emps);
@@ -48,8 +78,19 @@ export default function ObjectTeam() {
         initial[e.id] = { roleFolders: { observer: ['Все папки'] } as Record<RoleKey, string[]> };
       });
       setRoleAssignments(initial);
+      if (!activeEmployeeId && emps[0]) setActiveEmployeeId(emps[0].id);
     })();
   }, [id]);
+
+  // При выборе компании подгружаем её дерево подразделений и сбрасываем фильтры
+  useEffect(() => {
+    if (!selectedCompanyInn) return;
+    const tree = getCompanyStructure(selectedCompanyInn);
+    setCompanyUnits(tree);
+    setSelectedUnitPath(null);
+    setShowAllEmployees(false);
+    if (id && selectedCompanyInn) clearProjectCompanyNewFlag(id, selectedCompanyInn);
+  }, [selectedCompanyInn]);
 
   const filtered = useMemo(() => {
     return employees.filter(e =>
@@ -64,9 +105,7 @@ export default function ObjectTeam() {
       const current = prev[empId] || { roleFolders: {} as Record<RoleKey, string[]> };
       const roleFolders = { ...(current.roleFolders || {}) } as Record<RoleKey, string[]>;
       if (checked) {
-        if (!roleFolders[role] || roleFolders[role].length === 0) {
-          roleFolders[role] = ['Все папки'];
-        }
+        roleFolders[role] = ['Все папки'];
       } else {
         delete roleFolders[role];
       }
@@ -120,6 +159,8 @@ export default function ObjectTeam() {
     setOpenPickers((prev) => ({ ...prev, [key]: !prev[key] }));
   };
 
+  
+
   return (
     <Layout>
       <div className="space-y-6">
@@ -160,10 +201,103 @@ export default function ObjectTeam() {
           </CardContent>
         </Card>
 
-        {/* Employees */}
-        <div className="space-y-4">
-          {filtered.map((emp) => (
-            <Card key={emp.id} className="hover:shadow-lg transition-shadow">
+        <div className="grid grid-cols-12 gap-6">
+          {/* Companies left column (скрыто для администратора компании) */}
+          {currentUser.role !== 'company-admin' && (
+          <div className="col-span-12 md:col-span-4 lg:col-span-3">
+            <Card>
+              <CardContent className="p-4">
+                <div className="text-sm font-medium text-gray-500 mb-2">Компании-участники</div>
+                <div className="space-y-1">
+                  {companies.map((c) => (
+                    <button
+                      key={c.inn}
+                      className={`w-full text-left px-3 py-2 rounded hover:bg-gray-100 ${selectedCompanyInn === c.inn ? 'bg-gray-100 font-medium' : ''}`}
+                      onClick={() => setSelectedCompanyInn(c.inn)}
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm">{c.name}</span>
+                        {c.isNew && (
+                          <span className="ml-2 text-[10px] px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">новая</span>
+                        )}
+                      </div>
+                      <div className="text-xs text-gray-500">ИНН {c.inn}</div>
+                    </button>
+                  ))}
+                  {companies.length === 0 && (
+                    <div className="text-sm text-gray-500">Компании не найдены</div>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+          )}
+
+          {/* Company units middle column */}
+          <div className={`col-span-12 ${currentUser.role === 'company-admin' ? 'md:col-span-5 lg:col-span-4 xl:col-span-4' : 'md:col-span-4 lg:col-span-4 xl:col-span-3' }`}>
+            <Card>
+              <CardContent className="p-4">
+                <div className="flex items-center justify-between mb-2">
+                  <div className="text-sm font-medium text-gray-500">Подразделения</div>
+                  <label className="flex items-center space-x-2 text-xs">
+                    <Checkbox
+                      checked={showAllEmployees}
+                      onCheckedChange={(v) => setShowAllEmployees(Boolean(v))}
+                    />
+                    <span>Показать всех</span>
+                  </label>
+                </div>
+                {!showAllEmployees && (
+                  <div className="max-h-[60vh] overflow-y-auto space-y-1">
+                    {selectedCompanyInn ? (
+                      <div className="space-y-0.5">
+                        {(() => {
+                          const items: JSX.Element[] = [];
+                          const walk = (
+                            node: { name: string; children?: any[] },
+                            prefix: string[],
+                            depth: number
+                          ) => {
+                            const here = [...prefix, node.name];
+                            const path = here.join(' / ');
+                            items.push(
+                              <button
+                                key={path}
+                                className={`w-full text-left px-2 py-1 rounded hover:bg-gray-100 ${selectedUnitPath === path ? 'bg-gray-100 font-medium' : ''}`}
+                                onClick={() => setSelectedUnitPath(path)}
+                              >
+                                <span className="text-sm" style={{ paddingLeft: depth * 8 }}>{node.name}</span>
+                              </button>
+                            );
+                            node.children?.forEach((ch) => walk(ch, here, depth + 1));
+                          };
+                          companyUnits.forEach((root) => walk(root, [], 0));
+                          return items;
+                        })()}
+                      </div>
+                    ) : (
+                      <div className="text-sm text-gray-500">Выберите компанию</div>
+                    )}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Employees list right column */}
+          <div className={`col-span-12 ${currentUser.role === 'company-admin' ? 'md:col-span-7 lg:col-span-8 xl:col-span-8' : 'md:col-span-4 lg:col-span-5 xl:col-span-6'} space-y-4`}>
+          {filtered
+            .filter((emp) => {
+              if (!selectedCompanyInn) return true;
+              if (emp.companyInn !== selectedCompanyInn) return false;
+              if (showAllEmployees) return true;
+              if (!selectedUnitPath) return false;
+              return (emp.departmentPath || '').startsWith(selectedUnitPath);
+            })
+            .map((emp) => {
+            const isActive = activeEmployeeId === emp.id;
+            return (
+            <Card key={emp.id} className={`hover:shadow-lg transition-shadow cursor-pointer ${isActive ? 'ring-2 ring-blue-500' : ''}`} onClick={() => setActiveEmployeeId(emp.id)}>
               <CardContent className="p-6">
                 <div className="flex items-start space-x-4">
                   <div className="w-12 h-12 bg-blue-500 rounded-full flex items-center justify-center shrink-0">
@@ -185,10 +319,13 @@ export default function ObjectTeam() {
                     </div>
                     <div className="text-sm text-gray-600 mb-3">{emp.email} • {emp.phone}</div>
 
-                    <div className="grid grid-cols-1 gap-4">
+                    <div className={`grid grid-cols-1 gap-4 ${isActive ? '' : 'opacity-60'}`}>
                       <div>
                         <div className="text-sm font-medium text-gray-500 mb-2">Роли</div>
-                        <div className="space-y-3">
+                        {!isActive && (
+                          <div className="text-xs text-gray-500 mb-2">Нажмите на карточку, чтобы выбрать сотрудника</div>
+                        )}
+                        <div className={`space-y-3 ${isActive ? '' : 'pointer-events-none'}`}>
                           {(['signatory', 'reviewer', 'observer', 'editor', 'deleter'] as RoleKey[]).map((role) => {
                             const key = `${emp.id}:${role}`;
                             const enabled = Boolean(roleAssignments[emp.id]?.roleFolders?.[role]);
@@ -201,12 +338,12 @@ export default function ObjectTeam() {
                                     onCheckedChange={(val) => toggleRole(emp.id, role, Boolean(val))}
                                   />
                                   <span className="text-sm capitalize">
-                                    {role === 'signatory' ? 'подписант' : role === 'reviewer' ? 'проверяющий' : role === 'observer' ? 'наблюдающий' : role === 'editor' ? 'редактирование/изменение' : 'удаление'}
+                                    {role === 'signatory' ? 'подписант' : role === 'reviewer' ? 'проверяющий' : role === 'observer' ? 'наблюдающий' : role === 'editor' ? 'редактирование' : 'чтение'}
                                   </span>
-                                  {enabled && (
+                                  {Boolean(roleAssignments[emp.id]?.roleFolders?.[role]) && (
                                     <span className="text-xs text-gray-500">({label})</span>
                                   )}
-                                  {enabled && (
+                                  {Boolean(roleAssignments[emp.id]?.roleFolders?.[role]) && (
                                     <button
                                       type="button"
                                       onClick={() => togglePickerOpen(emp.id, role)}
@@ -246,13 +383,14 @@ export default function ObjectTeam() {
                 </div>
               </CardContent>
             </Card>
-          ))}
+          );})}
           {filtered.length === 0 && (
             <div className="text-center py-12">
               <Users className="w-12 h-12 mx-auto mb-4 text-gray-300" />
               <p className="text-gray-500">Сотрудники не найдены</p>
             </div>
           )}
+          </div>
         </div>
       </div>
     </Layout>

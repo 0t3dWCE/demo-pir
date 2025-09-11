@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import Layout from '../components/Layout';
 import { Button } from '@/components/ui/button';
@@ -23,6 +23,7 @@ import {
   ExternalLink,
   UserPlus
 } from 'lucide-react';
+import { getProjectNewCompanies, listAllCompaniesAggregated, listProjects } from '../../shared/api';
 
 interface Organization {
   id: string;
@@ -184,6 +185,58 @@ export default function Organizations() {
 
   // Локальное состояние списка организаций, чтобы отражать назначения на объекты
   const [organizations, setOrganizations] = useState<Organization[]>(mockOrganizations);
+  const [newOrganizations, setNewOrganizations] = useState<Set<string>>(new Set());
+
+  // Собираем ИНН «новых» компаний по всем проектам
+  useEffect(() => {
+    const acc = new Set<string>();
+    const allProjects = listProjects();
+    allProjects.forEach(p => {
+      try {
+        const arr = getProjectNewCompanies(p.id);
+        arr.forEach(inn => acc.add(inn));
+      } catch {}
+    });
+    setNewOrganizations(acc);
+  }, []);
+
+  // Подмешиваем компании из проектов в общий список (агрегированно)
+  useEffect(() => {
+    (async () => {
+      const all = await listAllCompaniesAggregated();
+      const byInn = new Map<string, Organization>();
+      // начинаем с текущего стейта (моки/уже добавленные)
+      setOrganizations(prev => {
+        prev.forEach(o => byInn.set(o.inn, o));
+        all.forEach(c => {
+          if (!byInn.has(c.inn)) {
+            byInn.set(c.inn, {
+              id: c.inn,
+              name: c.name,
+              type: c.roles.includes('проектировщик') ? 'Проектирование' : 'Заказчик',
+              inn: c.inn,
+              ogrn: '',
+              legalAddress: c.address || '',
+              actualAddress: c.address || '',
+              director: '',
+              phone: '',
+              email: '',
+              employeeCount: 0,
+              status: 'active',
+              addedDate: new Date().toISOString().slice(0,10),
+              projects: c.projectNames,
+              activityTypes: [],
+            });
+          } else {
+            const existed = byInn.get(c.inn)!;
+            const mergedProjects = Array.from(new Set([...(existed.projects||[]), ...c.projectNames]));
+            byInn.set(c.inn, { ...existed, projects: mergedProjects });
+          }
+        });
+        return Array.from(byInn.values());
+      });
+    })();
+  }, []);
 
   // Диалог назначения на объект
   const [isAssignDialogOpen, setIsAssignDialogOpen] = useState(false);
@@ -353,7 +406,9 @@ export default function Organizations() {
 
             {/* Organizations List */}
             <div className="space-y-4">
-              {filteredOrganizations.map((org) => {
+              {filteredOrganizations
+                .sort((a,b) => Number(newOrganizations.has(b.inn)) - Number(newOrganizations.has(a.inn)) || a.name.localeCompare(b.name))
+                .map((org) => {
                 // статусные бейджи скрываем
 
                 return (
@@ -363,7 +418,7 @@ export default function Organizations() {
                         <div className="flex-1">
                           <div className="flex items-center space-x-3 mb-3">
                             <Building className="w-6 h-6 text-gray-400" />
-                            <h3 className="text-xl font-semibold">{org.name}</h3>
+                            <h3 className="text-xl font-semibold flex items-center gap-2">{org.name} {newOrganizations.has(org.inn) && (<span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">Новая организация</span>)}</h3>
                             {/* Бейдж статуса скрыт */}
                             <Badge variant="outline">{org.type}</Badge>
                           </div>

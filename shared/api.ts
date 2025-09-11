@@ -112,6 +112,32 @@ const MOCK_OBJECT_CONTRACTS: ObjectContractInfo[] = [
       }
     ]
   },
+  // Добавим ещё один договор для того же объекта с НОВОЙ компанией,
+  // которая ранее не встречалась в системе pirNew — будет помечаться как «новая компания»
+  {
+    objectId: 'ext-obj-2',
+    contractNumber: 'ДП-2025-020',
+    participants: [
+      {
+        role: 'технический заказчик',
+        company: {
+          name: 'ООО «Север Кэпитал»',
+          inn: '7812001122',
+          kpp: '781201002',
+          address: '191186, г. Санкт-Петербург, Дворцовая наб., д. 2'
+        }
+      },
+      {
+        role: 'проектировщик',
+        company: {
+          name: 'ООО «АрхПроект+»',
+          inn: '7712340099',
+          kpp: '771201005',
+          address: '127018, г. Москва, ул. Складочная, д. 3'
+        }
+      }
+    ]
+  },
   {
     objectId: 'ext-obj-3',
     contractNumber: 'ДП-2023-077',
@@ -193,17 +219,39 @@ export async function getObjectCompanies(objectId: string): Promise<CompanyAggre
 // ------------------ Хранилище связей объект → компании (и метаданные) ------------------
 
 const PROJECT_COMPANIES: Record<string, CompanyAggregated[]> = {};
+// Компании, только что добавленные в проект (требуют настройки)
+const PROJECT_NEW_COMPANIES: Record<string, Set<string>> = {};
 const PROJECT_META: Record<string, { name: string }> = {};
 const PROJECT_EXTERNAL: Record<string, string> = {};
 const PROJECT_EMPLOYEES: Record<string, EmployeeMinimal[]> = {};
 
 export function setProjectCompanies(projectId: string, companies: CompanyAggregated[]) {
   PROJECT_COMPANIES[projectId] = companies;
+  // Отметим их как новые, если ранее не были в проекте
+  const set = PROJECT_NEW_COMPANIES[projectId] || (PROJECT_NEW_COMPANIES[projectId] = new Set<string>());
+  companies.forEach(c => set.add(c.inn));
 }
 
 export async function getProjectCompanies(projectId: string): Promise<CompanyAggregated[]> {
   await new Promise((r) => setTimeout(r, 100));
   return PROJECT_COMPANIES[projectId] || [];
+}
+
+export function getProjectNewCompanies(projectId: string): string[] {
+  return Array.from(PROJECT_NEW_COMPANIES[projectId] || new Set<string>());
+}
+
+export function clearProjectCompanyNewFlag(projectId: string, inn: string) {
+  PROJECT_NEW_COMPANIES[projectId]?.delete(inn);
+}
+
+// Проверка: встречалась ли компания в системе pirNew (в любом проекте)
+export function isCompanyKnownInPirNew(inn: string): boolean {
+  for (const pid of Object.keys(PROJECT_COMPANIES)) {
+    const list = PROJECT_COMPANIES[pid] || [];
+    if (list.some((c) => c.inn === inn)) return true;
+  }
+  return false;
 }
 
 export function setProjectMeta(projectId: string, name: string) {
@@ -216,6 +264,47 @@ export function getProjectMeta(projectId: string): { name: string } | undefined 
 
 export function listProjects(): Array<{ id: string; name: string }> {
   return Object.entries(PROJECT_META).map(([id, meta]) => ({ id, name: meta.name }));
+}
+
+// Агрегация всех компаний из всех проектов (уникализация по ИНН)
+export async function listAllCompaniesAggregated(): Promise<Array<{
+  inn: string;
+  name: string;
+  kpp?: string;
+  address?: string;
+  roles: CompanyRole[];
+  projectIds: string[];
+  projectNames: string[];
+}>> {
+  await new Promise((r) => setTimeout(r, 50));
+  const byInn: Record<string, {
+    inn: string; name: string; kpp?: string; address?: string; roles: Set<CompanyRole>; projectIds: Set<string>;
+  }> = {};
+  for (const [pid, companies] of Object.entries(PROJECT_COMPANIES)) {
+    companies?.forEach((c) => {
+      if (!byInn[c.inn]) {
+        byInn[c.inn] = {
+          inn: c.inn,
+          name: c.name,
+          kpp: c.kpp,
+          address: c.address,
+          roles: new Set<CompanyRole>(),
+          projectIds: new Set<string>(),
+        };
+      }
+      c.roles.forEach((r) => byInn[c.inn].roles.add(r));
+      byInn[c.inn].projectIds.add(pid);
+    });
+  }
+  return Object.values(byInn).map((v) => ({
+    inn: v.inn,
+    name: v.name,
+    kpp: v.kpp,
+    address: v.address,
+    roles: Array.from(v.roles),
+    projectIds: Array.from(v.projectIds),
+    projectNames: Array.from(v.projectIds).map((id) => PROJECT_META[id]?.name || id),
+  }));
 }
 
 export function setProjectExternalId(projectId: string, externalObjectId: string) {
@@ -253,6 +342,8 @@ export function getProjectExternalId(projectId: string): string | undefined {
       roles: ['проектировщик'], contractNumbers: ['ДП-2024-001']
     }
   ];
+  // Исходно ни одна компания не помечается как новая
+  PROJECT_NEW_COMPANIES['1'] = new Set();
 
   PROJECT_COMPANIES['2'] = [
     {
@@ -264,6 +355,7 @@ export function getProjectExternalId(projectId: string): string | undefined {
       roles: ['проектировщик'], contractNumbers: ['ДП-2024-010']
     }
   ];
+  PROJECT_NEW_COMPANIES['2'] = new Set();
 
   PROJECT_COMPANIES['3'] = [
     {
@@ -275,6 +367,7 @@ export function getProjectExternalId(projectId: string): string | undefined {
       roles: ['проектировщик'], contractNumbers: ['ДП-2023-077']
     }
   ];
+  PROJECT_NEW_COMPANIES['3'] = new Set();
 
   // Привязка дефолтных объектов к внешним объектам (для обновления из ИД)
   PROJECT_EXTERNAL['1'] = 'ext-obj-1';
@@ -291,6 +384,7 @@ export function getProjectExternalId(projectId: string): string | undefined {
       roles: ['проектировщик'], contractNumbers: ['ДП-2024-045']
     }
   ];
+  PROJECT_NEW_COMPANIES['4'] = new Set();
 
   PROJECT_COMPANIES['5'] = [
     {
@@ -302,6 +396,7 @@ export function getProjectExternalId(projectId: string): string | undefined {
       roles: ['проектировщик'], contractNumbers: ['ДП-2024-072']
     }
   ];
+  PROJECT_NEW_COMPANIES['5'] = new Set();
 
   PROJECT_COMPANIES['6'] = [
     {
@@ -313,6 +408,7 @@ export function getProjectExternalId(projectId: string): string | undefined {
       roles: ['проектировщик'], contractNumbers: ['ДП-2024-099']
     }
   ];
+  PROJECT_NEW_COMPANIES['6'] = new Set();
 })();
 
 // ------------------ Сотрудники по компаниям (мок-генерация) ------------------
@@ -328,6 +424,54 @@ export interface EmployeeMinimal {
   companyInn: string;
   companyName: string;
   isCompanyAdmin?: boolean;
+  departmentPath?: string; // путь подразделения в компании
+}
+
+// ------------------ Подразделения компаний (мок) ------------------
+
+export interface CompanyUnit { name: string; children?: CompanyUnit[] }
+
+const MOCK_COMPANY_STRUCTURES: Record<string, CompanyUnit[]> = {
+  '7701234567': [
+    { name: 'Дирекция по проектам', children: [
+      { name: 'Отдел архитектуры' },
+      { name: 'Отдел ПТО' }
+    ]},
+    { name: 'Служба заказчика', children: [ { name: 'Технический надзор' } ] }
+  ],
+  '7812345678': [
+    { name: 'Проектный институт', children: [
+      { name: 'АР', children: [ { name: 'Группа 1' }, { name: 'Группа 2' } ] },
+      { name: 'КР' },
+      { name: 'ОВиК' }
+    ]}
+  ],
+  '5409876543': [ { name: 'Проектный центр', children: [ { name: 'Отдел экспертизы' } ] } ],
+  '7812001122': [ { name: 'Управление проектов' } ],
+  '7703001122': [ { name: 'Проектный офис' } ],
+  '7722334455': [ { name: 'Отдел проектирования' } ],
+  '5034567890': [ { name: 'Проектный офис' } ],
+  '7709988776': [ { name: 'Отдел ИРД' } ],
+  '7805003322': [ { name: 'Управление строительства' } ],
+  '7811223344': [ { name: 'Проектный отдел' } ],
+};
+
+export function getCompanyStructure(inn: string): CompanyUnit[] {
+  const clone = (u: CompanyUnit): CompanyUnit => ({ name: u.name, children: u.children ? u.children.map(clone) : undefined });
+  const tree = MOCK_COMPANY_STRUCTURES[inn] || [ { name: 'Общий отдел' } ];
+  return tree.map(clone);
+}
+
+export function getCompanyUnitPaths(inn: string): string[] {
+  const tree = getCompanyStructure(inn);
+  const paths: string[] = [];
+  const walk = (node: CompanyUnit, prefix: string[]) => {
+    const cur = [...prefix, node.name];
+    paths.push(cur.join(' / '));
+    node.children?.forEach(ch => walk(ch, cur));
+  };
+  tree.forEach(r => walk(r, []));
+  return paths;
 }
 
 export async function getEmployeesForCompanies(companies: CompanyAggregated[]): Promise<EmployeeMinimal[]> {
@@ -359,6 +503,9 @@ export async function getEmployeesForCompanies(companies: CompanyAggregated[]): 
     const seed = Number(baseId.slice(-3)) || idx;
     const fullName1 = pickName(seed);
     const fullName2 = pickName(seed + 7);
+    const unitPaths = getCompanyUnitPaths(c.inn);
+    const unit1 = unitPaths[seed % unitPaths.length];
+    const unit2 = unitPaths[(seed + 1) % unitPaths.length];
 
     employees.push(
       {
@@ -369,7 +516,8 @@ export async function getEmployeesForCompanies(companies: CompanyAggregated[]): 
         phone: '+7 (900) 000-00-01',
         companyInn: c.inn,
         companyName: c.name,
-        isCompanyAdmin: true
+        isCompanyAdmin: true,
+        departmentPath: unit1
       },
       {
         id: `${baseId}-emp-2`,
@@ -379,7 +527,8 @@ export async function getEmployeesForCompanies(companies: CompanyAggregated[]): 
         phone: '+7 (900) 000-00-02',
         companyInn: c.inn,
         companyName: c.name,
-        isCompanyAdmin: false
+        isCompanyAdmin: false,
+        departmentPath: unit2
       }
     );
   });
@@ -441,6 +590,15 @@ export function getObjectFolderPaths(): string[] {
   };
   MOCK_OBJECT_FOLDERS.forEach((root) => dfs(root, []));
   return paths;
+}
+
+// Возвращает дерево папок объекта (безопасная копия)
+export function getObjectFolders(): ObjectFolder[] {
+  const clone = (node: ObjectFolder): ObjectFolder => ({
+    name: node.name,
+    children: node.children ? node.children.map(clone) : undefined
+  });
+  return MOCK_OBJECT_FOLDERS.map(clone);
 }
 
 // ------------------ Процессы согласования и доступы (мок) ------------------

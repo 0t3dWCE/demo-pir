@@ -9,7 +9,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Search, Plus, ExternalLink, Building2 } from 'lucide-react';
 import { useRole } from '../contexts/RoleContext';
-import { getObjectCompanies, CompanyAggregated, setProjectCompanies, setProjectMeta } from '../../shared/api';
+import { getObjectCompanies, CompanyAggregated, setProjectCompanies, setProjectMeta, isCompanyKnownInPirNew } from '../../shared/api';
 import { Checkbox } from '@/components/ui/checkbox';
 
 const mockProjects: Project[] = [
@@ -306,7 +306,12 @@ export default function Index() {
                                   />
                                   <div className="flex-1">
                                     <div className="flex items-center justify-between">
-                                      <div className="font-medium text-gray-900">{c.name}</div>
+                                      <div className="font-medium text-gray-900 flex items-center gap-2">
+                                        {c.name}
+                                        {!isCompanyKnownInPirNew(c.inn) && (
+                                          <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">новая компания</span>
+                                        )}
+                                      </div>
                                       <div className="text-xs text-gray-500">{c.roles.join(', ')}</div>
                                     </div>
                                     <div className="text-xs text-gray-600 mt-1">
