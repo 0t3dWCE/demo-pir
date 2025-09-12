@@ -474,6 +474,77 @@ export function getCompanyUnitPaths(inn: string): string[] {
   return paths;
 }
 
+// ---- Редактирование структуры компании (демо-хранилище с CRUD) ----
+const COMPANY_STRUCT_STORE: Record<string, CompanyUnit[]> = {};
+
+export function getCompanyStructureEditable(inn: string): CompanyUnit[] {
+  return (COMPANY_STRUCT_STORE[inn] || getCompanyStructure(inn)).map((u)=>({ name: u.name, children: u.children ? u.children.map((c)=>({ name: c.name, children: c.children?.map((cc)=>({ name: cc.name })) })) : undefined }));
+}
+
+export function setCompanyStructure(inn: string, tree: CompanyUnit[]): void {
+  COMPANY_STRUCT_STORE[inn] = tree;
+}
+
+export function addCompanyUnit(inn: string, path: string[] | null, name: string): void {
+  const cur = getCompanyStructureEditable(inn);
+  if (!path || path.length === 0) { cur.push({ name }); setCompanyStructure(inn, cur); return; }
+  const find = (nodes: CompanyUnit[], p: string[], idx: number): CompanyUnit | null => {
+    const here = nodes.find(n => n.name === p[idx]);
+    if (!here) return null;
+    if (idx === p.length - 1) return here;
+    here.children = here.children || [];
+    return find(here.children, p, idx + 1);
+  };
+  const parent = find(cur, path, 0);
+  if (parent) { parent.children = parent.children || []; parent.children.push({ name }); setCompanyStructure(inn, cur); }
+}
+
+export function removeCompanyUnit(inn: string, path: string[]): void {
+  const cur = getCompanyStructureEditable(inn);
+  if (path.length === 0) return;
+  const removeAt = (nodes: CompanyUnit[], p: string[], idx: number): boolean => {
+    if (idx === p.length - 1) {
+      const i = nodes.findIndex(n => n.name === p[idx]);
+      if (i >= 0) { nodes.splice(i, 1); return true; }
+      return false;
+    }
+    const here = nodes.find(n => n.name === p[idx]);
+    if (!here || !here.children) return false;
+    const ok = removeAt(here.children, p, idx + 1);
+    return ok;
+  };
+  if (removeAt(cur, path, 0)) setCompanyStructure(inn, cur);
+}
+
+// Привязка сотрудников к подразделениям (по пути) и права отдела на папки объекта
+const EMPLOYEE_TO_UNITS: Record<string, Record<string, string[]>> = {};// inn -> employeeId -> [paths]
+type UnitPerms = Record<string, string[]>; // role -> folderPaths
+const UNIT_FOLDER_PERMS: Record<string, Record<string, Record<string, UnitPerms>>> = {};// projectId -> inn -> unitPath -> roles
+
+export function assignEmployeeToUnit(inn: string, employeeId: string, unitPath: string): void {
+  const byEmp = EMPLOYEE_TO_UNITS[inn] || (EMPLOYEE_TO_UNITS[inn] = {});
+  const list = new Set(byEmp[employeeId] || []);
+  list.add(unitPath);
+  byEmp[employeeId] = Array.from(list);
+}
+
+export function listEmployeeUnits(inn: string, employeeId: string): string[] {
+  return EMPLOYEE_TO_UNITS[inn]?.[employeeId] || [];
+}
+
+// roles: набор ролей на папки объекта для подразделения, напр. { observer: ["01 - Общая информация"], editor: ["02 - Объекты..."] }
+export function setUnitFolderPermissions(projectId: string, inn: string, unitPath: string, roles: Record<string, string[]>): void {
+  if (!UNIT_FOLDER_PERMS[projectId]) UNIT_FOLDER_PERMS[projectId] = {};
+  if (!UNIT_FOLDER_PERMS[projectId][inn]) UNIT_FOLDER_PERMS[projectId][inn] = {} as Record<string, UnitPerms>;
+  UNIT_FOLDER_PERMS[projectId][inn][unitPath] = roles;
+}
+
+export function getUnitFolderPermissions(projectId: string, inn: string, unitPath: string): Record<string, string[]> | undefined {
+  return UNIT_FOLDER_PERMS[projectId] && UNIT_FOLDER_PERMS[projectId][inn]
+    ? UNIT_FOLDER_PERMS[projectId][inn][unitPath]
+    : undefined;
+}
+
 export async function getEmployeesForCompanies(companies: CompanyAggregated[]): Promise<EmployeeMinimal[]> {
   await new Promise((r) => setTimeout(r, 150));
   const employees: EmployeeMinimal[] = [];

@@ -7,7 +7,7 @@ import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { getProjectCompanies, getProjectMeta, getEmployeesForCompanies, getObjectFolderPaths, getProjectEmployees, setProjectEmployees, getProjectNewCompanies, clearProjectCompanyNewFlag, getCompanyStructure } from '../../shared/api';
+import { getProjectCompanies, getProjectMeta, getEmployeesForCompanies, getObjectFolderPaths, getProjectEmployees, setProjectEmployees, getProjectNewCompanies, clearProjectCompanyNewFlag, getCompanyStructureEditable, addCompanyUnit, removeCompanyUnit, getCompanyUnitPaths, assignEmployeeToUnit, listEmployeeUnits, setUnitFolderPermissions, getUnitFolderPermissions } from '../../shared/api';
 import { Users, ArrowLeft, Building2, Search } from 'lucide-react';
 import { useRole } from '../contexts/RoleContext';
 
@@ -38,6 +38,8 @@ export default function ObjectTeam() {
   const [companyUnits, setCompanyUnits] = useState<Array<{ name: string; children?: any[] }>>([]);
   const [showAllEmployees, setShowAllEmployees] = useState<boolean>(false);
   const [selectedUnitPath, setSelectedUnitPath] = useState<string | null>(null);
+  const [deptRoleAssignments, setDeptRoleAssignments] = useState<Record<RoleKey, string[]>>({} as Record<RoleKey, string[]>);
+  const [deptPickers, setDeptPickers] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     if (!id) return;
@@ -85,12 +87,26 @@ export default function ObjectTeam() {
   // При выборе компании подгружаем её дерево подразделений и сбрасываем фильтры
   useEffect(() => {
     if (!selectedCompanyInn) return;
-    const tree = getCompanyStructure(selectedCompanyInn);
+    const tree = getCompanyStructureEditable(selectedCompanyInn);
     setCompanyUnits(tree);
     setSelectedUnitPath(null);
     setShowAllEmployees(false);
     if (id && selectedCompanyInn) clearProjectCompanyNewFlag(id, selectedCompanyInn);
   }, [selectedCompanyInn]);
+
+  // Подгружаем права отдела при выборе узла
+  useEffect(() => {
+    if (!id || !selectedCompanyInn || !selectedUnitPath) { setDeptRoleAssignments({} as Record<RoleKey, string[]>); return; }
+    const fromApi = getUnitFolderPermissions(id, selectedCompanyInn, selectedUnitPath) || {};
+    const norm: Record<RoleKey, string[]> = {
+      signatory: fromApi['signatory'] || [],
+      reviewer: fromApi['reviewer'] || [],
+      observer: fromApi['observer'] || [],
+      editor: fromApi['editor'] || [],
+      deleter: fromApi['deleter'] || []
+    };
+    setDeptRoleAssignments(norm);
+  }, [id, selectedCompanyInn, selectedUnitPath]);
 
   const filtered = useMemo(() => {
     return employees.filter(e =>
@@ -157,6 +173,39 @@ export default function ObjectTeam() {
   const togglePickerOpen = (empId: string, role: RoleKey) => {
     const key = `${empId}:${role}`;
     setOpenPickers((prev) => ({ ...prev, [key]: !prev[key] }));
+  };
+
+  // Отдел: роли
+  const toggleDeptRole = (role: RoleKey, checked: boolean) => {
+    setDeptRoleAssignments((prev) => {
+      const next = { ...prev } as Record<RoleKey, string[]>;
+      if (checked) next[role] = ['Все папки']; else delete next[role];
+      if (id && selectedCompanyInn && selectedUnitPath) setUnitFolderPermissions(id, selectedCompanyInn, selectedUnitPath, next as any);
+      return next;
+    });
+  };
+
+  const toggleDeptFolderForRole = (role: RoleKey, folder: string, checked: boolean) => {
+    setDeptRoleAssignments((prev) => {
+      const next = { ...prev } as Record<RoleKey, string[]>;
+      const existing = new Set(next[role] || []);
+      if (folder === 'Все папки') {
+        if (checked) next[role] = ['Все папки']; else delete next[role];
+      } else {
+        const descendants = allFolders.filter((p) => p === folder || p.startsWith(folder + ' / '));
+        if (checked) { existing.delete('Все папки'); descendants.forEach((d) => existing.add(d)); }
+        else { descendants.forEach((d) => existing.delete(d)); }
+        next[role] = Array.from(existing);
+        if (next[role].length === 0) delete next[role];
+      }
+      if (id && selectedCompanyInn && selectedUnitPath) setUnitFolderPermissions(id, selectedCompanyInn, selectedUnitPath, next as any);
+      return { ...next };
+    });
+  };
+
+  const toggleDeptPickerOpen = (role: RoleKey) => {
+    const key = `dept:${role}`;
+    setDeptPickers((prev) => ({ ...prev, [key]: !prev[key] }));
   };
 
   
@@ -247,6 +296,16 @@ export default function ObjectTeam() {
                     <span>Показать всех</span>
                   </label>
                 </div>
+                {selectedCompanyInn && (
+                  <div className="mb-2">
+                    <Button size="sm" variant="secondary" onClick={() => {
+                      const name = prompt('Название отдела');
+                      if (!name) return;
+                      addCompanyUnit(selectedCompanyInn, null, name);
+                      setCompanyUnits(getCompanyStructureEditable(selectedCompanyInn));
+                    }}>+ Корневой отдел</Button>
+                  </div>
+                )}
                 {!showAllEmployees && (
                   <div className="max-h-[60vh] overflow-y-auto space-y-1">
                     {selectedCompanyInn ? (
@@ -261,13 +320,28 @@ export default function ObjectTeam() {
                             const here = [...prefix, node.name];
                             const path = here.join(' / ');
                             items.push(
-                              <button
-                                key={path}
-                                className={`w-full text-left px-2 py-1 rounded hover:bg-gray-100 ${selectedUnitPath === path ? 'bg-gray-100 font-medium' : ''}`}
-                                onClick={() => setSelectedUnitPath(path)}
-                              >
-                                <span className="text-sm" style={{ paddingLeft: depth * 8 }}>{node.name}</span>
-                              </button>
+                              <div key={path} className="flex items-center">
+                                <button
+                                  className={`flex-1 text-left px-2 py-1 rounded hover:bg-gray-100 ${selectedUnitPath === path ? 'bg-gray-100 font-medium' : ''}`}
+                                  onClick={() => setSelectedUnitPath(path)}
+                                >
+                                  <span className="text-sm" style={{ paddingLeft: depth * 8 }}>{node.name}</span>
+                                </button>
+                                <div className="flex items-center gap-1">
+                                  <Button variant="ghost" className="h-7 px-2 text-xs" onClick={() => {
+                                    const name = prompt('Название подразделения');
+                                    if (!name) return;
+                                    addCompanyUnit(selectedCompanyInn!, here, name);
+                                    setCompanyUnits(getCompanyStructureEditable(selectedCompanyInn!));
+                                  }}>+</Button>
+                                  <Button variant="ghost" className="h-7 px-2 text-xs" onClick={() => {
+                                    if (!confirm(`Удалить '${node.name}'?`)) return;
+                                    removeCompanyUnit(selectedCompanyInn!, here);
+                                    setCompanyUnits(getCompanyStructureEditable(selectedCompanyInn!));
+                                    if (selectedUnitPath && selectedUnitPath.startsWith(path)) setSelectedUnitPath(null);
+                                  }}>🗑</Button>
+                                </div>
+                              </div>
                             );
                             node.children?.forEach((ch) => walk(ch, here, depth + 1));
                           };
@@ -278,6 +352,47 @@ export default function ObjectTeam() {
                     ) : (
                       <div className="text-sm text-gray-500">Выберите компанию</div>
                     )}
+                  </div>
+                )}
+
+                {selectedUnitPath && (
+                  <div className="mt-4 border-t pt-3">
+                    <div className="text-sm font-medium text-gray-500 mb-2">Права отдела: {selectedUnitPath}</div>
+                    {(['signatory', 'reviewer', 'observer', 'editor', 'deleter'] as RoleKey[]).map((role) => {
+                      const enabled = Boolean(deptRoleAssignments[role]);
+                      const label = deptRoleAssignments[role]?.includes('Все папки') ? 'Все папки' : (deptRoleAssignments[role]?.join(', ') || '');
+                      const key = `dept:${role}`;
+                      return (
+                        <div key={role} className="mb-2">
+                          <div className="flex items-center space-x-2">
+                            <Checkbox checked={enabled} onCheckedChange={(val) => toggleDeptRole(role, Boolean(val))} />
+                            <span className="text-sm">
+                              {role === 'signatory' ? 'подписант' : role === 'reviewer' ? 'проверяющий' : role === 'observer' ? 'наблюдающий' : role === 'editor' ? 'редактирование' : 'чтение'}
+                            </span>
+                            {enabled && (
+                              <span className="text-xs text-gray-500">({label})</span>
+                            )}
+                            {enabled && (
+                              <button className="text-xs text-blue-600 ml-2 hover:underline" onClick={() => toggleDeptPickerOpen(role)}>Настроить папки</button>
+                            )}
+                          </div>
+                          {enabled && deptPickers[key] && (
+                            <div className="mt-2 ml-6 p-2 border rounded bg-gray-50 max-h-40 overflow-y-auto">
+                              <label className="flex items-center space-x-2 mb-2">
+                                <Checkbox checked={Boolean(deptRoleAssignments[role]?.includes('Все папки'))} onCheckedChange={(val) => toggleDeptFolderForRole(role, 'Все папки', Boolean(val))} />
+                                <span className="text-sm">Все папки</span>
+                              </label>
+                              {allFolders.map((p) => (
+                                <label key={p} className="flex items-center space-x-2">
+                                  <Checkbox checked={Boolean(deptRoleAssignments[role]?.includes(p))} onCheckedChange={(val) => toggleDeptFolderForRole(role, p, Boolean(val))} />
+                                  <span className="text-sm">{p}</span>
+                                </label>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
               </CardContent>
@@ -292,7 +407,8 @@ export default function ObjectTeam() {
               if (emp.companyInn !== selectedCompanyInn) return false;
               if (showAllEmployees) return true;
               if (!selectedUnitPath) return false;
-              return (emp.departmentPath || '').startsWith(selectedUnitPath);
+              const units = listEmployeeUnits(selectedCompanyInn, emp.id);
+              return units.some((p) => p === selectedUnitPath || p.startsWith(selectedUnitPath + ' / '));
             })
             .map((emp) => {
             const isActive = activeEmployeeId === emp.id;
@@ -318,6 +434,27 @@ export default function ObjectTeam() {
                       </Badge>
                     </div>
                     <div className="text-sm text-gray-600 mb-3">{emp.email} • {emp.phone}</div>
+
+                    {selectedCompanyInn && (
+                      <div className="mb-3 flex items-center gap-2 flex-wrap">
+                        <span className="text-xs text-gray-500">Назначить на отдел:</span>
+                        <Select onValueChange={(val) => { assignEmployeeToUnit(selectedCompanyInn, emp.id, val); }}>
+                          <SelectTrigger className="w-[280px] h-8">
+                            <SelectValue placeholder="Выберите подразделение" />
+                          </SelectTrigger>
+                          <SelectContent className="max-h-64 overflow-y-auto">
+                            {getCompanyUnitPaths(selectedCompanyInn).map((p) => (
+                              <SelectItem key={p} value={p}>{p}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <div className="flex flex-wrap gap-1">
+                          {listEmployeeUnits(selectedCompanyInn, emp.id).map((p) => (
+                            <Badge key={p} className="bg-slate-100 text-slate-700 border">{p}</Badge>
+                          ))}
+                        </div>
+                      </div>
+                    )}
 
                     <div className={`grid grid-cols-1 gap-4 ${isActive ? '' : 'opacity-60'}`}>
                       <div>

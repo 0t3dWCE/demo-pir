@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Layout from '../components/Layout';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -91,6 +91,9 @@ type NewStepForm = {
   autoReject: boolean;
   participants: Participant[];
   requireAllParticipants: boolean;
+  // новый флаг: параллельный шаг и к какому порядку он относится
+  isParallel?: boolean;
+  parallelOfOrder?: number;
 };
 
 const mockProcesses: Process[] = [
@@ -263,8 +266,12 @@ export default function Processes() {
   const [processInitialCreateForms, setProcessInitialCreateForms] = useState<Record<string, number>>({});
   const [draftStepsMap, setDraftStepsMap] = useState<Record<string, NewStepForm[]>>({});
   const [assigneePickerOpen, setAssigneePickerOpen] = useState(false);
-  const [assigneePickerContext, setAssigneePickerContext] = useState<{ processId: string; draftIndex: number } | null>(null);
+  const [assigneePickerContext, setAssigneePickerContext] = useState<any>(null);
   const [assigneePickerMode, setAssigneePickerMode] = useState<'company' | 'project'>('company');
+  // Тип назначения участника: конкретный человек / должность в департаменте / должность / департамент
+  const [assigneeBy, setAssigneeBy] = useState<'person' | 'position_in_department' | 'position' | 'department'>('person');
+  const [assigneeDepartment, setAssigneeDepartment] = useState<string>('');
+  const [assigneePosition, setAssigneePosition] = useState<string>('');
   const [availableEmployees, setAvailableEmployees] = useState<Array<{ id: string; name: string; company: string }>>([]);
   const [selectedEmployeesIds, setSelectedEmployeesIds] = useState<string[]>([]);
   const [pickerCompanies, setPickerCompanies] = useState<Array<{ inn: string; name: string }>>([]);
@@ -279,6 +286,149 @@ export default function Processes() {
     autoReject: boolean;
     requireAll: boolean;
   }>>>({});
+  // Хранение количества параллельных веток для каждого шага (processId -> order -> count)
+  const [parallelMap, setParallelMap] = useState<Record<string, Record<number, number>>>({});
+  // Детали параллельных шагов
+  const [parallelDetailsMap, setParallelDetailsMap] = useState<Record<string, Record<number, NewStepForm[]>>>({});
+  const [selectedStepIndex, setSelectedStepIndex] = useState<number>(0);
+  const [selectedParallel, setSelectedParallel] = useState<{ order: number; index: number } | null>(null);
+  const [parallelDraftOrder, setParallelDraftOrder] = useState<number | null>(null);
+  const [parallelDraft, setParallelDraft] = useState<NewStepForm | null>(null);
+
+  const addParallelForStep = (processId: string, order: number) => {
+    setParallelMap((prev) => ({
+      ...prev,
+      [processId]: { ...(prev[processId] || {}), [order]: ((prev[processId] || {})[order] || 0) + 1 },
+    }));
+    setParallelDraftOrder(order);
+    setSelectedParallel(null);
+    // инициализируем черновик параллельного шага
+    setParallelDraft({
+      tempId: `p-${processId}-${order}-${Date.now()}`,
+      name: `Шаг ${order}.1`,
+      timeLimit: 3,
+      isRequired: true,
+      canFinishOnThis: false,
+      canSkip: false,
+      autoReject: false,
+      participants: [],
+      requireAllParticipants: false,
+    });
+  };
+
+  const deleteParallelStep = (processId: string, order: number, index: number) => {
+    const details = parallelDetailsMap[processId] || {};
+    const list = details[order] || [];
+    const updated = list.filter((_, i) => i !== index);
+    const nextDetails = { ...details, [order]: updated };
+    setParallelDetailsMap({ ...parallelDetailsMap, [processId]: nextDetails });
+    setSelectedParallel(null);
+    // обновим счётчик
+    setParallelMap(prev => ({
+      ...prev,
+      [processId]: { ...(prev[processId] || {}), [order]: Math.max(0, ((prev[processId] || {})[order] || 1) - 1) }
+    }));
+  };
+
+  const updateParallelData = (processId: string, order: number, index: number, partial: Partial<NewStepForm>) => {
+    const map = parallelDetailsMap[processId] || {};
+    const list = [...(map[order] || [])];
+    const cur = list[index];
+    if (!cur) return;
+    list[index] = { ...cur, ...partial } as NewStepForm;
+    setParallelDetailsMap({ ...parallelDetailsMap, [processId]: { ...map, [order]: list } });
+  };
+
+  const renderParallelCard = () => {
+    if (!selectedParallel || !selectedProcess) return null;
+    const data = (parallelDetailsMap[selectedProcess.id]?.[selectedParallel.order] || [])[selectedParallel.index];
+    if (!data) return null;
+    return (
+      <Card key={`p-${selectedParallel.order}-${selectedParallel.index}`}>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <CardTitle className="text-lg flex items-center">
+              <span className="w-8 h-8 bg-blue-500 text-white rounded-full flex items-center justify-center mr-3 text-sm">{`${selectedParallel.order}.${selectedParallel.index + 1}`}</span>
+              {data.name}
+            </CardTitle>
+            <Badge variant={data.isRequired ? 'default' : 'secondary'}>
+              {data.isRequired ? 'Обязательный' : 'Опциональный'}
+            </Badge>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-2 gap-6">
+            <div>
+              <h4 className="font-medium mb-3">Участники шага</h4>
+              <div className="space-y-2">
+                {(data.participants?.length || 0) === 0 ? (
+                  <div className="p-2 bg-gray-50 rounded text-sm text-gray-500">Пока нет участников</div>
+                ) : (
+                  (data.participants || []).map((p, i) => (
+                    <div key={`${p.id}-${i}`} className="flex items-center justify-between p-2 bg-gray-50 rounded">
+                      <div className="flex items-center space-x-2">
+                        <User className="w-4 h-4 text-gray-500" />
+                        <div>
+                          <div className="text-sm font-medium">{p.name}</div>
+                          <div className="text-xs text-gray-500">{p.role}</div>
+                        </div>
+                      </div>
+                      <div className="flex items-center space-x-2">
+                        <Badge variant={p.isRequired ? 'default' : 'secondary'} className="text-xs">{p.isRequired ? 'Обязательный' : 'Опциональный'}</Badge>
+                        <Button variant="ghost" size="sm" onClick={() => {
+                          const next = (data.participants || []).filter((_, idx) => idx !== i);
+                          updateParallelData(selectedProcess.id, selectedParallel.order, selectedParallel.index, { participants: next as any });
+                        }}>
+                          <Trash2 className="w-4 h-4" />
+                        </Button>
+                      </div>
+                    </div>
+                  ))
+                )}
+                <Button variant="outline" size="sm" className="w-full" onClick={() => openAssigneePicker(selectedProcess.id, { parallel: { order: selectedParallel.order, index: selectedParallel.index } })}>
+                  <Plus className="w-4 h-4 mr-2" />
+                  Добавить пользователя
+                </Button>
+              </div>
+            </div>
+            <div>
+              <h4 className="font-medium mb-3">Правила шага</h4>
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm">Время согласования</span>
+                  <Input type="number" className="w-28" value={data.timeLimit} onChange={(e) => updateParallelData(selectedProcess.id, selectedParallel.order, selectedParallel.index, { timeLimit: Number(e.target.value) })} />
+                </div>
+                <div className="flex items-center space-x-2">
+                  <Checkbox checked={data.isRequired} onCheckedChange={(v) => updateParallelData(selectedProcess.id, selectedParallel.order, selectedParallel.index, { isRequired: Boolean(v) })} />
+                  <span className="text-sm">Обязательный шаг</span>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <Checkbox checked={data.canSkip} onCheckedChange={(v) => updateParallelData(selectedProcess.id, selectedParallel.order, selectedParallel.index, { canSkip: Boolean(v) })} />
+                  <span className="text-sm">Можно пропустить</span>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <Checkbox checked={data.requireAllParticipants} onCheckedChange={(v) => updateParallelData(selectedProcess.id, selectedParallel.order, selectedParallel.index, { requireAllParticipants: Boolean(v) })} />
+                  <span className="text-sm">Требуется проверка всех участников шага</span>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <Checkbox checked={data.autoReject} onCheckedChange={(v) => updateParallelData(selectedProcess.id, selectedParallel.order, selectedParallel.index, { autoReject: Boolean(v) })} />
+                  <span className="text-sm">Авто-отклонение при несогласовании</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  };
+
+  // При открытии редактирования процесса по умолчанию выбираем первый шаг
+  useEffect(() => {
+    if (selectedProcess) {
+      setSelectedStepIndex(0);
+      setSelectedParallel(null);
+    }
+  }, [selectedProcess]);
 
   const filteredProcesses = processes.filter(process => {
     const matchesSearch = process.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -350,7 +500,9 @@ export default function Processes() {
         isRequired: true,
         canFinishOnThis: (i + 1) === (createStepsCount || 1),
         canSkip: false,
-        autoReject: false
+        autoReject: false,
+        participants: [],
+        requireAllParticipants: false
       }));
       setDraftStepsMap({ ...draftStepsMap, [id]: drafts });
     }
@@ -369,7 +521,9 @@ export default function Processes() {
       canSkip: false,
       autoReject: false,
       participants: [],
-      requireAllParticipants: false
+      requireAllParticipants: false,
+      isParallel: false,
+      parallelOfOrder: undefined
     };
     setDraftStepsMap({ ...draftStepsMap, [processId]: [...list, newDraft] });
   };
@@ -397,7 +551,21 @@ export default function Processes() {
     };
     const updatedDrafts = drafts.filter((_, i) => i !== draftIndex);
     setDraftStepsMap({ ...draftStepsMap, [processId]: updatedDrafts });
-    setProcessStepsMap({ ...processStepsMap, [processId]: [...existing, newStep] });
+    // если шаг помечен как параллельный — запишем в parallelMap/parallelDetailsMap
+    if (draft.isParallel && draft.parallelOfOrder) {
+      const baseOrder = draft.parallelOfOrder;
+      setParallelMap((prev) => ({
+        ...prev,
+        [processId]: { ...(prev[processId] || {}), [baseOrder]: ((prev[processId] || {})[baseOrder] || 0) + 1 }
+      }));
+      const details = parallelDetailsMap[processId] || {};
+      const list = details[baseOrder] || [];
+      const data: NewStepForm = { ...draft, tempId: newStep.id };
+      const updated = [...list, data];
+      setParallelDetailsMap({ ...parallelDetailsMap, [processId]: { ...details, [baseOrder]: updated } });
+    } else {
+      setProcessStepsMap({ ...processStepsMap, [processId]: [...existing, newStep] });
+    }
     if (updatedDrafts.length === 0) {
       const { [processId]: _, ...rest } = processInitialCreateForms;
       setProcessInitialCreateForms(rest);
@@ -487,8 +655,9 @@ export default function Processes() {
     setProcessStepsMap({ ...processStepsMap, [processId]: [...steps, newStep] });
   };
 
-  const openAssigneePicker = async (processId: string, draftIndex: number) => {
-    setAssigneePickerContext({ processId, draftIndex });
+  const openAssigneePicker = async (processId: string, ctx: { draftIndex?: number; savedIndex?: number; parallel?: { order: number; index: number } } | number) => {
+    const contextObj = typeof ctx === 'number' ? { draftIndex: ctx } : ctx;
+    setAssigneePickerContext({ processId, ...(contextObj || {}) });
     setAssigneePickerMode('company');
     setSelectedEmployeesIds([]);
     setAvailableEmployees([]);
@@ -942,7 +1111,7 @@ export default function Processes() {
         {/* Process Step Configuration Dialog */}
         {selectedProcess && (
           <Dialog open={selectedProcess !== null} onOpenChange={() => setSelectedProcess(null)}>
-            <DialogContent className="max-w-4xl max-h-[80vh] overflow-y-auto">
+            <DialogContent className="w-[90vw] max-w-[90vw] max-h-[80vh] overflow-y-auto">
               <DialogHeader>
                 <DialogTitle className="flex items-center space-x-2">
                   <Settings className="w-5 h-5" />
@@ -958,7 +1127,53 @@ export default function Processes() {
                 </TabsList>
 
                 <TabsContent value="steps" className="mt-6">
-                  <div className="space-y-4">
+                  <div className="grid grid-cols-12 gap-6">
+                    {/* Левая колонка: Структура */}
+                    <div className="col-span-12 md:col-span-4">
+                      <Card>
+                        <CardHeader>
+                          <CardTitle className="text-lg">Структура процесса</CardTitle>
+                        </CardHeader>
+                        <CardContent>
+                          <div className="text-sm text-gray-600 mb-2">{selectedProcess.name}</div>
+                          <div className="space-y-1">
+                            {(processStepsMap[selectedProcess.id] || []).filter((s) => !(s.order > 1 && ((parallelMap[selectedProcess.id]?.[s.order - 1] || 0) > 0))).map((s, idx) => (
+                              <div key={`tree-${s.id}`}>
+                                <div className={`flex items-center justify-between ${selectedStepIndex === idx && !selectedParallel ? 'bg-gray-50' : ''}`}>
+                                  <button className="pl-2 text-left flex-1 py-1" onClick={() => { setSelectedParallel(null); setSelectedStepIndex(idx); }}>
+                                    <span className="text-sm font-medium">Шаг {s.order}: {s.name}</span>
+                                  </button>
+                                  <Button variant="ghost" size="sm" onClick={() => addParallelForStep(selectedProcess.id, s.order)}>+
+                                  </Button>
+                                </div>
+                                <div className="pl-6 text-xs text-gray-600">
+                                  {Array.from({ length: (parallelMap[selectedProcess.id]?.[s.order] || 0) }).map((_, i) => {
+                                    const name = (parallelDetailsMap[selectedProcess.id]?.[s.order] || [])[i]?.name || `Шаг ${s.order}.${i + 1}`;
+                                    const isActive = selectedParallel && selectedParallel.order === s.order && selectedParallel.index === i;
+                                    return (
+                                      <div key={`p-${s.order}-${i}`} className="flex items-center justify-between">
+                                        <button className={`pl-2 py-0.5 text-left flex-1 ${isActive ? 'font-medium' : ''}`} onClick={() => setSelectedParallel({ order: s.order, index: i })}>
+                                          {name}
+                                        </button>
+                                        <Button variant="ghost" size="sm" onClick={() => deleteParallelStep(selectedProcess.id, s.order, i)}>
+                                          <Trash2 className="w-4 h-4" />
+                                        </Button>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                            ))}
+                            {(processStepsMap[selectedProcess.id] || []).length === 0 && (
+                              <div className="text-sm text-gray-500">Шаги ещё не добавлены</div>
+                            )}
+                          </div>
+                        </CardContent>
+                      </Card>
+                    </div>
+
+                    {/* Правая колонка: Формы/список шагов */}
+                    <div className="col-span-12 md:col-span-8 space-y-4">
                     <div className="flex items-center justify-between">
                       <h3 className="text-lg font-medium">Настройка шагов</h3>
                       <Button size="sm" onClick={() => addDraftStep(selectedProcess.id)}>
@@ -967,9 +1182,10 @@ export default function Processes() {
                       </Button>
                     </div>
                     {/* Показать формы создания шага, если процесс создан "с нуля" или уже есть черновики шагов */}
-                    {processInitialCreateForms[selectedProcess.id] || (draftStepsMap[selectedProcess.id] && draftStepsMap[selectedProcess.id].length > 0) ? (
+                    {processInitialCreateForms[selectedProcess.id] || (draftStepsMap[selectedProcess.id] && draftStepsMap[selectedProcess.id].length > 0) || (parallelDraftOrder !== null && !selectedParallel) ? (
                       <div className="space-y-4">
-                        {Array.from({ length: (draftStepsMap[selectedProcess.id]?.length || processInitialCreateForms[selectedProcess.id]) }).map((_, idx) => (
+                        {/* Если есть черновики (создание нового процесса) — показываем только выбранный индекс, иначе блок ниже отрисует сохранённый шаг по выбору */}
+                        {Array.from({ length: (draftStepsMap[selectedProcess.id]?.length || processInitialCreateForms[selectedProcess.id] || 0) }).map((_, idx) => (
                           <Card key={`new-step-form-${idx}`}>
                             <CardHeader>
                               <div className="flex items-center justify-between">
@@ -999,6 +1215,25 @@ export default function Processes() {
                                       <Label>Время согласования (дней)</Label>
                                       <Input type="number" min="1" value={(draftStepsMap[selectedProcess.id]?.[idx]?.timeLimit) ?? 3} onChange={(e) => updateDraftStep(selectedProcess.id, idx, { timeLimit: Number(e.target.value) })} />
                                     </div>
+                                    <div className="flex items-center space-x-2">
+                                      <Checkbox checked={Boolean(draftStepsMap[selectedProcess.id]?.[idx]?.isParallel)} onCheckedChange={(v)=> updateDraftStep(selectedProcess.id, idx, { isParallel: Boolean(v) })} />
+                                      <span className="text-sm">Параллельный шаг</span>
+                                    </div>
+                                    {Boolean(draftStepsMap[selectedProcess.id]?.[idx]?.isParallel) && (
+                                      <div>
+                                        <Label>К какому шагу параллелен</Label>
+                                        <Select value={String(draftStepsMap[selectedProcess.id]?.[idx]?.parallelOfOrder || '')} onValueChange={(v)=> updateDraftStep(selectedProcess.id, idx, { parallelOfOrder: Number(v) })}>
+                                          <SelectTrigger>
+                                            <SelectValue placeholder="Выберите шаг" />
+                                          </SelectTrigger>
+                                          <SelectContent className="w-[--radix-select-trigger-width]">
+                                            {(processStepsMap[selectedProcess.id] || []).map((s)=> (
+                                              <SelectItem key={`ord-${s.order}`} value={String(s.order)}>Шаг {s.order}: {s.name}</SelectItem>
+                                            ))}
+                                          </SelectContent>
+                                        </Select>
+                                      </div>
+                                    )}
                                     <div className="flex items-center space-x-2">
                                       <Checkbox checked={(draftStepsMap[selectedProcess.id]?.[idx]?.isRequired) ?? true} onCheckedChange={(v) => updateDraftStep(selectedProcess.id, idx, { isRequired: Boolean(v) })} />
                                       <span className="text-sm">Обязательный шаг</span>
@@ -1056,7 +1291,7 @@ export default function Processes() {
                                       ))
                                     )}
                                     <div className="grid grid-cols-1 gap-2">
-                                      <Button variant="outline" size="sm" onClick={() => openAssigneePicker(selectedProcess.id, idx)}>
+                                      <Button variant="outline" size="sm" onClick={() => openAssigneePicker(selectedProcess.id, { draftIndex: idx })}>
                                         <User className="w-4 h-4 mr-2" />
                                         Добавить пользователя
                                       </Button>
@@ -1067,14 +1302,74 @@ export default function Processes() {
                             </CardContent>
                           </Card>
                         ))}
+                        {/* Форма создания параллельного шага */}
+                        {parallelDraftOrder !== null && parallelDraft && (
+                          <Card>
+                            <CardHeader>
+                              <div className="flex items-center justify-between">
+                                <CardTitle className="text-lg flex items-center">
+                                  <span className="w-8 h-8 bg-blue-500 text-white rounded-full flex items-center justify-center mr-3 text-sm">{`${parallelDraftOrder}.x`}</span>
+                                  Новый параллельный шаг
+                                </CardTitle>
+                                <div className="flex items-center space-x-2">
+                                  <Badge variant="secondary">Черновик шага</Badge>
+                                  <Button variant="outline" size="sm" onClick={() => setParallelDraftOrder(null)}>
+                                    <Trash2 className="w-4 h-4 mr-2" />
+                                    Отмена
+                                  </Button>
+                                </div>
+                              </div>
+                            </CardHeader>
+                            <CardContent>
+                              <div className="space-y-3">
+                                <div>
+                                  <Label>Название шага</Label>
+                                  <Input placeholder={`Шаг ${parallelDraftOrder}.1`} value={parallelDraft.name} onChange={(e) => setParallelDraft({ ...parallelDraft, name: e.target.value })} />
+                                </div>
+                                <div>
+                                  <Label>Время согласования (дней)</Label>
+                                  <Input type="number" min="1" value={parallelDraft.timeLimit} onChange={(e) => setParallelDraft({ ...parallelDraft, timeLimit: Number(e.target.value) })} />
+                                </div>
+                                <div className="flex items-center space-x-2">
+                                  <Checkbox checked={parallelDraft.isRequired} onCheckedChange={(v) => setParallelDraft({ ...parallelDraft, isRequired: Boolean(v) })} />
+                                  <span className="text-sm">Обязательный шаг</span>
+                                </div>
+                                <div className="flex items-center space-x-2">
+                                  <Checkbox checked={parallelDraft.canSkip} onCheckedChange={(v) => setParallelDraft({ ...parallelDraft, canSkip: Boolean(v) })} />
+                                  <span className="text-sm">Можно пропустить</span>
+                                </div>
+                                <div className="flex items-center space-x-2">
+                                  <Checkbox checked={parallelDraft.autoReject} onCheckedChange={(v) => setParallelDraft({ ...parallelDraft, autoReject: Boolean(v) })} />
+                                  <span className="text-sm">Авто-отклонение при несогласовании</span>
+                                </div>
+                                <div className="flex items-center space-x-2">
+                                  <Checkbox checked={parallelDraft.requireAllParticipants} onCheckedChange={(v) => setParallelDraft({ ...parallelDraft, requireAllParticipants: Boolean(v) })} />
+                                  <span className="text-sm">Требуется проверка всех участников шага</span>
+                                </div>
+                                <div className="pt-2">
+                                  <Button size="sm" onClick={() => {
+                                    if (!selectedProcess || parallelDraftOrder === null || !parallelDraft) return;
+                                    const map = parallelDetailsMap[selectedProcess.id] || {};
+                                    const list = map[parallelDraftOrder] || [];
+                                    const updatedList = [...list, parallelDraft];
+                                    setParallelDetailsMap({ ...parallelDetailsMap, [selectedProcess.id]: { ...map, [parallelDraftOrder]: updatedList } });
+                                    setParallelDraftOrder(null);
+                                    setSelectedParallel({ order: parallelDraftOrder, index: updatedList.length - 1 });
+                                  }}>Сохранить шаг</Button>
+                                </div>
+                              </div>
+                            </CardContent>
+                          </Card>
+                        )}
                         <div className="flex justify-end">
                           <Button onClick={applyProcessChanges}>Применить изменения</Button>
                         </div>
                       </div>
                     ) : (
                     
-                    /* Иначе показываем существующие шаги */
-                    (processStepsMap[selectedProcess.id] || mockSteps).map((step, index) => (
+                    /* Иначе показываем сохранённый шаг либо выбранный параллельный */
+                    selectedParallel && selectedProcess ? renderParallelCard() : (
+                    (processStepsMap[selectedProcess.id] || mockSteps).filter((_, index) => index === selectedStepIndex).map((step, index) => (
                       <Card key={step.id}>
                         <CardHeader>
                           <div className="flex items-center justify-between">
@@ -1121,7 +1416,7 @@ export default function Processes() {
                                     </div>
                                   </div>
                                 ))}
-                                <Button variant="outline" size="sm" className="w-full" onClick={() => openAssigneePicker(selectedProcess.id, -1)}>
+                                <Button variant="outline" size="sm" className="w-full" onClick={() => openAssigneePicker(selectedProcess.id, { savedIndex: selectedStepIndex })}>
                                   <Plus className="w-4 h-4 mr-2" />
                                   Добавить участника
                                 </Button>
@@ -1238,10 +1533,11 @@ export default function Processes() {
                           </div>
                         </CardContent>
                       </Card>
-                    ))
+                    )))
                     )}
                     <div className="flex justify-end mt-4">
                       <Button onClick={applyProcessChanges}>Применить изменения</Button>
+                    </div>
                     </div>
                   </div>
                 </TabsContent>
@@ -1312,7 +1608,7 @@ export default function Processes() {
 
         {/* Assignee Picker Dialog */}
         <Dialog open={assigneePickerOpen} onOpenChange={setAssigneePickerOpen}>
-          <DialogContent className="max-w-2xl">
+          <DialogContent className="max-w-3xl">
             <DialogHeader>
               <DialogTitle className="flex items-center space-x-2">
                 <User className="w-5 h-5" />
@@ -1320,6 +1616,49 @@ export default function Processes() {
               </DialogTitle>
             </DialogHeader>
             <div className="space-y-4">
+              <Card>
+                <CardContent className="p-4">
+                  <div className="text-sm font-medium text-gray-700 mb-2">Кто может согласовывать на этом шаге</div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <label className="flex items-center space-x-2 text-sm">
+                      <Checkbox checked={assigneeBy === 'person'} onCheckedChange={() => setAssigneeBy('person')} />
+                      <span>Конкретный человек</span>
+                    </label>
+                    <label className="flex items-center space-x-2 text-sm">
+                      <Checkbox checked={assigneeBy === 'position_in_department'} onCheckedChange={() => setAssigneeBy('position_in_department')} />
+                      <span>Должность в конкретном департаменте</span>
+                    </label>
+                    <label className="flex items-center space-x-2 text-sm">
+                      <Checkbox checked={assigneeBy === 'position'} onCheckedChange={() => setAssigneeBy('position')} />
+                      <span>Конкретная должность</span>
+                    </label>
+                    <label className="flex items-center space-x-2 text-sm">
+                      <Checkbox checked={assigneeBy === 'department'} onCheckedChange={() => setAssigneeBy('department')} />
+                      <span>Конкретный департамент</span>
+                    </label>
+                  </div>
+                  {(assigneeBy === 'position_in_department' || assigneeBy === 'department') && (
+                    <div className="grid grid-cols-2 gap-3 mt-3">
+                      <div>
+                        <Label className="text-xs">Департамент</Label>
+                        <Input placeholder="Например: Отдел архитектуры" value={assigneeDepartment} onChange={(e)=>setAssigneeDepartment(e.target.value)} />
+                      </div>
+                      {assigneeBy === 'position_in_department' && (
+                        <div>
+                          <Label className="text-xs">Должность</Label>
+                          <Input placeholder="Например: Главный архитектор" value={assigneePosition} onChange={(e)=>setAssigneePosition(e.target.value)} />
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  {assigneeBy === 'position' && (
+                    <div className="mt-3">
+                      <Label className="text-xs">Должность</Label>
+                      <Input placeholder="Например: Инженер-конструктор" value={assigneePosition} onChange={(e)=>setAssigneePosition(e.target.value)} />
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
               <div className="flex items-center space-x-2">
                 <Button variant={assigneePickerMode === 'company' ? 'default' : 'outline'} size="sm" onClick={() => setAssigneePickerMode('company')}>Из компании</Button>
                 <Button variant={assigneePickerMode === 'project' ? 'default' : 'outline'} size="sm" onClick={() => setAssigneePickerMode('project')}>Из объекта</Button>
@@ -1383,19 +1722,21 @@ export default function Processes() {
                 <Button variant="outline" onClick={() => setAssigneePickerOpen(false)}>Отмена</Button>
                 <Button onClick={() => {
                   if (!assigneePickerContext) { setAssigneePickerOpen(false); return; }
-                  const { processId, draftIndex } = assigneePickerContext;
+                  const { processId, draftIndex, savedIndex } = assigneePickerContext;
                   // формируем участников из выбранных сотрудников
-                  const newParticipants: Participant[] = selectedEmployeesIds.map((id, idx) => {
+                  const fromPersons: Participant[] = selectedEmployeesIds.map((id, idx) => {
                     const emp = availableEmployees.find(e => e.id === id)!;
-                    return {
-                      id: emp.id,
-                      name: emp.name,
-                      role: 'Участник',
-                      type: 'user',
-                      isRequired: false
-                    };
+                    return { id: emp.id, name: emp.name, role: 'Участник', type: 'user', isRequired: false };
                   });
-                  if (draftIndex >= 0) {
+                  const metaParticipant: Participant | null = assigneeBy === 'person' ? null : {
+                    id: `meta-${Date.now()}`,
+                    name: assigneeBy === 'department' ? `Департамент: ${assigneeDepartment}` : assigneeBy === 'position' ? `Должность: ${assigneePosition}` : `Департамент: ${assigneeDepartment}; Должность: ${assigneePosition}`,
+                    role: 'Группа/роль',
+                    type: 'group',
+                    isRequired: false
+                  };
+                  const newParticipants: Participant[] = metaParticipant ? [metaParticipant, ...fromPersons] : fromPersons;
+                  if (typeof draftIndex === 'number') {
                     const drafts = draftStepsMap[processId] || [];
                     const draft = drafts[draftIndex];
                     const alreadyHas = draft?.participants?.length || 0;
@@ -1406,20 +1747,35 @@ export default function Processes() {
                     const updatedDraft: NewStepForm = { ...draft, participants } as NewStepForm;
                     const updatedDrafts = drafts.map((d, i) => i === draftIndex ? updatedDraft : d);
                     setDraftStepsMap({ ...draftStepsMap, [processId]: updatedDrafts });
+                  } else if (assigneePickerContext?.parallel) {
+                    const { order, index } = assigneePickerContext.parallel;
+                    const details = parallelDetailsMap[processId] || {};
+                    const list = [...(details[order] || [])];
+                    const cur = list[index];
+                    if (cur) {
+                      const alreadyHas = (cur.participants?.length || 0);
+                      const merged = [
+                        ...(cur.participants || []),
+                        ...newParticipants.map((p, i) => ({ ...p, isRequired: alreadyHas === 0 && i === 0 }))
+                      ];
+                      list[index] = { ...cur, participants: merged } as any;
+                      setParallelDetailsMap({ ...parallelDetailsMap, [processId]: { ...details, [order]: list } });
+                    }
                   } else {
                     // добавление в существующий сохранённый шаг: используем первый шаг как пример (для демо)
                     const steps = processStepsMap[processId] || [];
-                    if (steps.length > 0) {
-                      const first = steps[0];
-                      const alreadyHas = first.participants.length;
-                      const updatedFirst: ProcessStep = {
-                        ...first,
+                    const targetIndex = typeof savedIndex === 'number' ? savedIndex : 0;
+                    if (steps[targetIndex]) {
+                      const target = steps[targetIndex];
+                      const alreadyHas = target.participants.length;
+                      const updatedTarget: ProcessStep = {
+                        ...target,
                         participants: [
-                          ...first.participants,
+                          ...target.participants,
                           ...newParticipants.map((p, idx) => ({ ...p, isRequired: alreadyHas === 0 && idx === 0 }))
                         ]
                       };
-                      const updatedSteps = steps.map((s, i) => i === 0 ? updatedFirst : s);
+                      const updatedSteps = steps.map((s, i) => i === targetIndex ? updatedTarget : s);
                       setProcessStepsMap({ ...processStepsMap, [processId]: updatedSteps });
                     }
                   }
