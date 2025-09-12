@@ -164,15 +164,59 @@ export default function ObjectTeam() {
   };
 
   const getRoleFoldersLabel = (empId: string, role: RoleKey): string => {
-    const folders = roleAssignments[empId]?.roleFolders?.[role];
-    if (!folders || folders.length === 0) return '';
-    if (folders.includes('Все папки')) return 'Все папки';
-    return folders.join(', ');
+    const effective = getEffectiveFolders(empId, role);
+    if (effective.length === 0) return '';
+    if (effective.includes('Все папки')) return 'Все папки';
+    return effective.join(', ');
   };
 
   const togglePickerOpen = (empId: string, role: RoleKey) => {
     const key = `${empId}:${role}`;
     setOpenPickers((prev) => ({ ...prev, [key]: !prev[key] }));
+  };
+
+  // Эффективные (наследованные + персональные) папки для роли сотрудника
+  const getEffectiveFolders = (empId: string, role: RoleKey): string[] => {
+    const personal = roleAssignments[empId]?.roleFolders?.[role] || [];
+    const fromUnits = new Set<string>();
+    if (id && selectedCompanyInn) {
+      const units = listEmployeeUnits(selectedCompanyInn, empId);
+      for (const unitPath of units) {
+        const perms = getUnitFolderPermissions(id, selectedCompanyInn, unitPath) as any;
+        const list: string[] | undefined = perms?.[role];
+        if (list && list.length) {
+          if (list.includes('Все папки')) return ['Все папки'];
+          list.forEach((p) => fromUnits.add(p));
+        }
+      }
+    }
+    const merged = new Set<string>(personal);
+    for (const p of Array.from(fromUnits)) merged.add(p);
+    if (merged.has('Все папки')) return ['Все папки'];
+    return Array.from(merged);
+  };
+
+  // Назначение прав отдела на сотрудника (наследование при назначении на отдел)
+  const applyDeptRightsToEmployee = (empId: string, unitPath: string) => {
+    if (!id || !selectedCompanyInn) return;
+    const dept = getUnitFolderPermissions(id, selectedCompanyInn, unitPath) || {};
+    if (!dept) return;
+    setRoleAssignments((prev) => {
+      const current = prev[empId] || { roleFolders: {} as Record<RoleKey, string[]> };
+      const roleFolders = { ...(current.roleFolders || {}) } as Record<RoleKey, string[]>;
+      (['signatory','reviewer','observer','editor','deleter'] as RoleKey[]).forEach((rk) => {
+        const fromDept = (dept as any)[rk] as string[] | undefined;
+        if (!fromDept || fromDept.length === 0) return;
+        if (fromDept.includes('Все папки')) {
+          roleFolders[rk] = ['Все папки'];
+        } else {
+          const merged = new Set(roleFolders[rk] || []);
+          fromDept.forEach((f) => merged.add(f));
+          roleFolders[rk] = Array.from(merged);
+        }
+      });
+      return { ...prev, [empId]: { roleFolders } };
+    });
   };
 
   // Отдел: роли
@@ -438,7 +482,7 @@ export default function ObjectTeam() {
                     {selectedCompanyInn && (
                       <div className="mb-3 flex items-center gap-2 flex-wrap">
                         <span className="text-xs text-gray-500">Назначить на отдел:</span>
-                        <Select onValueChange={(val) => { assignEmployeeToUnit(selectedCompanyInn, emp.id, val); }}>
+                        <Select onValueChange={(val) => { assignEmployeeToUnit(selectedCompanyInn, emp.id, val); applyDeptRightsToEmployee(emp.id, val); }}>
                           <SelectTrigger className="w-[280px] h-8">
                             <SelectValue placeholder="Выберите подразделение" />
                           </SelectTrigger>
