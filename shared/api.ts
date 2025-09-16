@@ -545,6 +545,23 @@ export function getUnitFolderPermissions(projectId: string, inn: string, unitPat
     : undefined;
 }
 
+// Подсчёт сотрудников в департаменте компании (по всем проектам)
+export function countEmployeesInDepartment(inn: string, unitPath: string): number {
+  if (!inn || !unitPath) return 0;
+  let count = 0;
+  const projects = Object.keys(PROJECT_EMPLOYEES);
+  for (const pid of projects) {
+    const emps = PROJECT_EMPLOYEES[pid] || [];
+    for (const e of emps) {
+      if (e.companyInn !== inn) continue;
+      const units = EMPLOYEE_TO_UNITS[inn]?.[e.id] || [];
+      if (units.some((p) => p === unitPath || p.startsWith(unitPath + ' / '))) { count++; continue; }
+      if ((e as any).departmentPath && ((e as any).departmentPath === unitPath || (e as any).departmentPath.startsWith(unitPath + ' / '))) { count++; continue; }
+    }
+  }
+  return count;
+}
+
 export async function getEmployeesForCompanies(companies: CompanyAggregated[]): Promise<EmployeeMinimal[]> {
   await new Promise((r) => setTimeout(r, 150));
   const employees: EmployeeMinimal[] = [];

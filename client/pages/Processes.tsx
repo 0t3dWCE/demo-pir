@@ -10,7 +10,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Checkbox } from '@/components/ui/checkbox';
-import { getProjectCompanies, getProjectEmployees, getEmployeesForCompanies, listProjects } from '../../shared/api';
+import { getProjectCompanies, getProjectEmployees, getEmployeesForCompanies, listProjects, getObjectFolderPaths, getCompanyUnitPaths, countEmployeesInDepartment } from '../../shared/api';
 import { useRole } from '../contexts/RoleContext';
 import { Link } from 'react-router-dom';
 import { 
@@ -38,6 +38,12 @@ import {
   Workflow
 } from 'lucide-react';
 
+const projectNameById: Record<string, string> = {
+  'project-1': 'ЖК «Северный парк»',
+  'project-2': 'БЦ «Технологический»',
+  'project-3': 'ТРК «Галерея»'
+};
+
 interface Process {
   id: string;
   name: string;
@@ -51,6 +57,9 @@ interface Process {
   lastUsed?: string;
   isTemplate: boolean;
   averageTime: string;
+  linkedProjectId?: string;
+  linkedProjectName?: string;
+  linkedFolder?: string;
 }
 
 interface ProcessStep {
@@ -72,6 +81,8 @@ interface Participant {
   role: string;
   type: 'user' | 'group';
   isRequired: boolean;
+  meta?: { companyInn?: string; departmentPath?: string };
+  warning?: string;
 }
 
 interface StepRule {
@@ -216,9 +227,9 @@ const statusConfig = {
 };
 
 const typeConfig = {
-  'approval': { label: 'Согласование документов', color: 'bg-blue-500', icon: FileText },
-  'review': { label: 'Рассмотрение и проверка', color: 'bg-purple-500', icon: Eye },
-  'custom': { label: 'Специализированный', color: 'bg-orange-500', icon: Settings }
+  'approval': { label: '', color: 'bg-blue-500', icon: FileText },
+  'review': { label: '', color: 'bg-purple-500', icon: Eye },
+  'custom': { label: '', color: 'bg-orange-500', icon: Settings }
 };
 
 export default function Processes() {
@@ -234,14 +245,14 @@ export default function Processes() {
   const [isDuplicateDialogOpen, setIsDuplicateDialogOpen] = useState(false);
   const [processToDuplicate, setProcessToDuplicate] = useState<Process | null>(null);
   const [duplicateName, setDuplicateName] = useState('');
-  const [creationOption, setCreationOption] = useState<'new' | 'template' | 'copy'>('new');
+  const [creationOption, setCreationOption] = useState<'template' | 'copy'>('template');
   const [selectedTemplateId, setSelectedTemplateId] = useState<string | undefined>(undefined);
   const [selectedCopyId, setSelectedCopyId] = useState<string | undefined>(undefined);
-  const [createType, setCreateType] = useState<string>('');
-  const [createStepsCount, setCreateStepsCount] = useState<number>(2);
   const [createName, setCreateName] = useState<string>('');
   const [createDescription, setCreateDescription] = useState<string>('');
   const [createProject, setCreateProject] = useState<string | undefined>(undefined);
+  const [createFolder, setCreateFolder] = useState<string | undefined>(undefined);
+  const [availableFolders] = useState<string[]>(getObjectFolderPaths());
 
   // Дополнительные предустановленные типы из требований (для выпадалки создания)
   const extraProcessTypes: Array<{ value: string; label: string }> = [
@@ -277,6 +288,9 @@ export default function Processes() {
   const [pickerCompanies, setPickerCompanies] = useState<Array<{ inn: string; name: string }>>([]);
   const [pickerProjects, setPickerProjects] = useState<Array<{ id: string; name: string }>>([]);
   const [pickerCompanyMap, setPickerCompanyMap] = useState<Record<string, any>>({});
+  const [pickerSelectedCompanyInn, setPickerSelectedCompanyInn] = useState<string | undefined>(undefined);
+  const [deptPaths, setDeptPaths] = useState<string[]>([]);
+  const [selectedDeptPath, setSelectedDeptPath] = useState<string | undefined>(undefined);
   const [editingSteps, setEditingSteps] = useState<Record<string, Record<number, {
     name: string;
     timeLimit: number;
@@ -464,48 +478,28 @@ export default function Processes() {
     } else if (creationOption === 'copy' && selectedCopyId) {
       sourceProcess = processes.find(p => p.id === selectedCopyId);
       stepsForProcess = processStepsMap[selectedCopyId] || mockSteps;
-    } else {
-      // Для нового процесса не создаём шаги, а показываем формы создания
-      stepsForProcess = [];
     }
-
-    // Маппим выбранный тип из выпадалки к базовому типу процесса
-    const baseType: 'approval' | 'review' | 'custom' =
-      createType === 'approval' || createType === 'review' || createType === 'custom'
-        ? (createType as 'approval' | 'review' | 'custom')
-        : 'custom';
 
     const newProcess: Process = {
       id,
       name: createName || 'Новый процесс',
       description: createDescription || '',
-      type: sourceProcess?.type || baseType,
+      type: sourceProcess?.type || 'custom',
       status: 'draft',
       steps: stepsForProcess.length,
       projectsCount: createProject ? 1 : 0,
       documentsProcessed: 0,
       createdDate: new Date().toISOString().slice(0, 10),
       isTemplate: false,
-      averageTime: 'Не определено'
+      averageTime: 'Не определено',
+      linkedProjectId: createProject,
+      linkedProjectName: createProject ? (projectNameById[createProject] || createProject) : undefined,
+      linkedFolder: createFolder
     };
 
     setProcesses([newProcess, ...processes]);
     setProcessStepsMap({ ...processStepsMap, [id]: stepsForProcess });
-    if (creationOption === 'new') {
-      setProcessInitialCreateForms({ ...processInitialCreateForms, [id]: createStepsCount || 1 });
-      const drafts: NewStepForm[] = Array.from({ length: createStepsCount || 1 }).map((_, i) => ({
-        tempId: `draft-${i + 1}-${Date.now()}`,
-        name: `Шаг ${i + 1}`,
-        timeLimit: 3,
-        isRequired: true,
-        canFinishOnThis: (i + 1) === (createStepsCount || 1),
-        canSkip: false,
-        autoReject: false,
-        participants: [],
-        requireAllParticipants: false
-      }));
-      setDraftStepsMap({ ...draftStepsMap, [id]: drafts });
-    }
+    // Для создания из шаблона/копии дополнительные черновики шагов не требуются
     setIsCreateDialogOpen(false);
   };
 
@@ -762,27 +756,7 @@ export default function Processes() {
                 <div className="space-y-4">
                   <h3 className="text-lg font-medium">Основная информация</h3>
                   <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <Label htmlFor="processType">Тип рабочего процесса *</Label>
-                      <Select value={createType} onValueChange={(v) => setCreateType(v)}>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Выберите тип" />
-                        </SelectTrigger>
-                        <SelectContent className="w-[--radix-select-trigger-width]">
-                          {/* <SelectItem value="approval">Согласование документов</SelectItem>
-                          <SelectItem value="review">Рассмотрение и проверка</SelectItem>
-                          <SelectItem value="custom">Специализированный</SelectItem> */}
-                          {/* Доп. типы из перечня */}
-                          {extraProcessTypes.map(t => (
-                            <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div>
-                      <Label htmlFor="processSteps">Количество шагов *</Label>
-                      <Input type="number" min="1" max="10" value={createStepsCount} onChange={(e) => setCreateStepsCount(Number(e.target.value))} />
-                    </div>
+                    {/* Тип процесса и количество шагов убраны по требованиям */}
                   </div>
                   <div>
                     <Label htmlFor="processName">Название процесса *</Label>
@@ -793,17 +767,29 @@ export default function Processes() {
                     <Textarea id="processDescription" placeholder="Краткое описание процесса..." rows={3} value={createDescription} onChange={(e) => setCreateDescription(e.target.value)} />
                   </div>
                   <div>
-                    <Label htmlFor="processProject">Привязка к объекту</Label>
-                    <Select value={createProject} onValueChange={setCreateProject}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Выберите объект (необязательно)" />
-                      </SelectTrigger>
-                      <SelectContent className="w-[--radix-select-trigger-width]">
-                        <SelectItem value="project-1">ЖК «Северный парк»</SelectItem>
-                        <SelectItem value="project-2">БЦ «Технологический»</SelectItem>
-                        <SelectItem value="project-3">ТРК «Галерея»</SelectItem>
-                      </SelectContent>
-                    </Select>
+                    <Label htmlFor="processProject">Привязка к папке</Label>
+                    <div className="grid grid-cols-2 gap-2">
+                      <Select value={createProject} onValueChange={(v)=>{ setCreateProject(v); }}>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Выберите объект (необязательно)" />
+                        </SelectTrigger>
+                        <SelectContent className="w-[--radix-select-trigger-width]">
+                          <SelectItem value="project-1">ЖК «Северный парк»</SelectItem>
+                          <SelectItem value="project-2">БЦ «Технологический»</SelectItem>
+                          <SelectItem value="project-3">ТРК «Галерея»</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <Select value={createFolder} onValueChange={setCreateFolder}>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Выберите папку" />
+                        </SelectTrigger>
+                        <SelectContent className="w-[--radix-select-trigger-width] max-h-64 overflow-y-auto">
+                          {availableFolders.map((p)=> (
+                            <SelectItem key={p} value={p}>{p}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
                   </div>
                 </div>
 
@@ -811,13 +797,6 @@ export default function Processes() {
                 <div className="space-y-4">
                   <h3 className="text-lg font-medium">Способ создания</h3>
                   <div className="grid grid-cols-3 gap-4">
-                    <Card onClick={() => setCreationOption('new')} className={`cursor-pointer hover:shadow-md transition-shadow border-2 ${creationOption === 'new' ? 'border-blue-500' : 'border-transparent'}`}>
-                      <CardContent className="p-4 text-center">
-                        <Plus className="w-8 h-8 mx-auto mb-2 text-blue-500" />
-                        <h4 className="font-medium mb-1">Создать с нуля</h4>
-                        <p className="text-sm text-gray-600">Настроить все шаги вручную</p>
-                      </CardContent>
-                    </Card>
                     <Card onClick={() => setCreationOption('template')} className={`cursor-pointer hover:shadow-md transition-shadow border-2 ${creationOption === 'template' ? 'border-blue-500' : 'border-transparent'}`}>
                       <CardContent className="p-4 text-center">
                         <FileText className="w-8 h-8 mx-auto mb-2 text-purple-500" />
@@ -883,7 +862,7 @@ export default function Processes() {
         {/* Main Content */}
         <Tabs value={activeTab} onValueChange={setActiveTab}>
           <TabsList>
-            <TabsTrigger value="list">Список процессов</TabsTrigger>
+            <TabsTrigger value="list">Процессы</TabsTrigger>
             <TabsTrigger value="templates">Шаблоны</TabsTrigger>
           </TabsList>
 
@@ -949,16 +928,13 @@ export default function Processes() {
                               <StatusIcon className="w-3 h-3 mr-1" />
                               {statusInfo.label}
                             </Badge>
-                            <Badge className={`${typeInfo.color} text-white`}>
-                              <TypeIcon className="w-3 h-3 mr-1" />
-                              {typeInfo.label}
-                            </Badge>
-                            {process.isTemplate && (
-                              <Badge variant="outline">
-                                <FileText className="w-3 h-3 mr-1" />
-                                Шаблон
+                            {false && (
+                              <Badge className={`${typeInfo.color} text-white`}>
+                                <TypeIcon className="w-3 h-3 mr-1" />
+                                {typeInfo.label}
                               </Badge>
                             )}
+                            {/* На вкладке "Процессы" бейдж "Шаблон" не отображаем */}
                           </div>
 
                           <p className="text-gray-600 mb-4">{process.description}</p>
@@ -983,7 +959,7 @@ export default function Processes() {
                               <div className="space-y-1 text-sm">
                                 <div className="flex items-center">
                                   <Building2 className="w-3 h-3 mr-2 text-gray-400" />
-                                  {process.projectsCount} проектов
+                                  {process.projectsCount} {process.projectsCount === 1 ? 'объект' : 'объектов'}
                                 </div>
                                 <div className="flex items-center">
                                   <FileText className="w-3 h-3 mr-2 text-gray-400" />
@@ -1063,10 +1039,12 @@ export default function Processes() {
                               <StatusIcon className="w-3 h-3 mr-1" />
                               {statusInfo.label}
                             </Badge>
-                            <Badge className={`${typeInfo.color} text-white`}>
-                              <TypeIcon className="w-3 h-3 mr-1" />
-                              {typeInfo.label}
-                            </Badge>
+                            {false && (
+                              <Badge className={`${typeInfo.color} text-white`}>
+                                <TypeIcon className="w-3 h-3 mr-1" />
+                                {typeInfo.label}
+                              </Badge>
+                            )}
                             <Badge variant="outline">
                               <FileText className="w-3 h-3 mr-1" />
                               Шаблон
@@ -1400,6 +1378,12 @@ export default function Processes() {
                                       <div>
                                         <div className="text-sm font-medium">{participant.name}</div>
                                         <div className="text-xs text-gray-500">{participant.role}</div>
+                                        {(participant.type === 'group' && participant.meta?.companyInn && participant.meta?.departmentPath) && (()=>{
+                                          const cnt = countEmployeesInDepartment(participant.meta!.companyInn!, participant.meta!.departmentPath!);
+                                          return cnt === 0 ? (
+                                            <div className="text-xs text-red-600 mt-1">В выбранном департаменте нет сотрудников</div>
+                                          ) : null;
+                                        })()}
                                       </div>
                                     </div>
                                     <div className="flex items-center space-x-2">
@@ -1551,17 +1535,11 @@ export default function Processes() {
                         <Input defaultValue={selectedProcess.name} />
                       </div>
                       <div>
-                        <Label>Тип процесса</Label>
-                        <Select defaultValue={selectedProcess.type}>
-                          <SelectTrigger>
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent className="w-[--radix-select-trigger-width]">
-                            <SelectItem value="approval">Согласование документов</SelectItem>
-                            <SelectItem value="review">Рассмотрение и проверка</SelectItem>
-                            <SelectItem value="custom">Специализированный</SelectItem>
-                          </SelectContent>
-                        </Select>
+                        <Label>Привязка</Label>
+                        <div className="text-sm text-gray-700 p-2 border rounded bg-gray-50">
+                          <div><span className="text-gray-500">Объект:</span> {selectedProcess.linkedProjectName || '—'}</div>
+                          <div><span className="text-gray-500">Папка:</span> {selectedProcess.linkedFolder || '—'}</div>
+                        </div>
                       </div>
                     </div>
                     <div>
@@ -1641,7 +1619,16 @@ export default function Processes() {
                     <div className="grid grid-cols-2 gap-3 mt-3">
                       <div>
                         <Label className="text-xs">Департамент</Label>
-                        <Input placeholder="Например: Отдел архитектуры" value={assigneeDepartment} onChange={(e)=>setAssigneeDepartment(e.target.value)} />
+                        <Select value={selectedDeptPath} onValueChange={(v)=> setSelectedDeptPath(v)}>
+                          <SelectTrigger>
+                            <SelectValue placeholder={pickerSelectedCompanyInn ? 'Выберите департамент' : 'Сначала выберите компанию'} />
+                          </SelectTrigger>
+                          <SelectContent className="w-[--radix-select-trigger-width] max-h-64 overflow-y-auto">
+                            {deptPaths.map((p)=> (
+                              <SelectItem key={p} value={p}>{p}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
                       </div>
                       {assigneeBy === 'position_in_department' && (
                         <div>
@@ -1667,7 +1654,7 @@ export default function Processes() {
               {assigneePickerMode === 'company' && (
                 <div className="space-y-2">
                   <Label>Компания</Label>
-                  <Select onValueChange={(inn) => loadEmployeesFromCompanyGlobal(inn)}>
+                  <Select onValueChange={(inn) => { setPickerSelectedCompanyInn(inn); loadEmployeesFromCompanyGlobal(inn); setDeptPaths(getCompanyUnitPaths(inn)); setSelectedDeptPath(undefined); }}>
                     <SelectTrigger>
                       <SelectValue placeholder="Выберите компанию" />
                     </SelectTrigger>
@@ -1730,10 +1717,12 @@ export default function Processes() {
                   });
                   const metaParticipant: Participant | null = assigneeBy === 'person' ? null : {
                     id: `meta-${Date.now()}`,
-                    name: assigneeBy === 'department' ? `Департамент: ${assigneeDepartment}` : assigneeBy === 'position' ? `Должность: ${assigneePosition}` : `Департамент: ${assigneeDepartment}; Должность: ${assigneePosition}`,
+                    name: assigneeBy === 'department' ? `Департамент: ${selectedDeptPath || assigneeDepartment}` : assigneeBy === 'position' ? `Должность: ${assigneePosition}` : `Департамент: ${assigneeDepartment}; Должность: ${assigneePosition}`,
                     role: 'Группа/роль',
                     type: 'group',
-                    isRequired: false
+                    isRequired: false,
+                    meta: { companyInn: pickerSelectedCompanyInn, departmentPath: selectedDeptPath || assigneeDepartment },
+                    warning: (assigneeBy === 'department' && selectedDeptPath && availableEmployees.length === 0) ? 'В выбранном департаменте нет сотрудников' : undefined
                   };
                   const newParticipants: Participant[] = metaParticipant ? [metaParticipant, ...fromPersons] : fromPersons;
                   if (typeof draftIndex === 'number') {
