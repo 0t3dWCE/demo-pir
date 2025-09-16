@@ -40,6 +40,7 @@ export default function ObjectTeam() {
   const [selectedUnitPath, setSelectedUnitPath] = useState<string | null>(null);
   const [deptRoleAssignments, setDeptRoleAssignments] = useState<Record<RoleKey, string[]>>({} as Record<RoleKey, string[]>);
   const [deptPickers, setDeptPickers] = useState<Record<string, boolean>>({});
+  const [companyRolesMap, setCompanyRolesMap] = useState<Record<string, ('технический заказчик' | 'проектировщик')[]>>({});
 
   useEffect(() => {
     if (!id) return;
@@ -48,6 +49,9 @@ export default function ObjectTeam() {
     (async () => {
       // Компании и флаг "новая"
       const comps = await getProjectCompanies(id);
+      const rolesMap: Record<string, ('технический заказчик' | 'проектировщик')[]> = {};
+      comps.forEach((c) => { rolesMap[c.inn] = c.roles as any; });
+      setCompanyRolesMap(rolesMap);
       const newInns = getProjectNewCompanies(id) || [];
       const compList = comps.map(c => ({ inn: c.inn, name: c.name, isNew: newInns.includes(c.inn) }));
       compList.sort((a, b) => Number(b.isNew) - Number(a.isNew) || a.name.localeCompare(b.name));
@@ -77,7 +81,7 @@ export default function ObjectTeam() {
       setEmployees(emps);
       const initial: Record<string, { roleFolders: Record<RoleKey, string[]> }> = {};
       emps.forEach((e) => {
-        initial[e.id] = { roleFolders: { observer: ['Все папки'] } as Record<RoleKey, string[]> };
+        initial[e.id] = { roleFolders: {} as Record<RoleKey, string[]> };
       });
       setRoleAssignments(initial);
       if (!activeEmployeeId && emps[0]) setActiveEmployeeId(emps[0].id);
@@ -107,6 +111,18 @@ export default function ObjectTeam() {
     };
     setDeptRoleAssignments(norm);
   }, [id, selectedCompanyInn, selectedUnitPath]);
+  const getAllowedRoleKeys = (inn: string | null): RoleKey[] => {
+    if (!inn) return [];
+    const roles = companyRolesMap[inn] || [];
+    if (roles.includes('проектировщик')) {
+      return ['editor', 'deleter']; // проектировщик: читатель, редактор
+    }
+    if (roles.includes('технический заказчик')) {
+      return ['reviewer', 'observer', 'deleter']; // ТЗ: согласующий, наблюдатель, читатель
+    }
+    return ['deleter'];
+  };
+
 
   const filtered = useMemo(() => {
     return employees.filter(e =>
@@ -182,11 +198,16 @@ export default function ObjectTeam() {
     if (id && selectedCompanyInn) {
       const units = listEmployeeUnits(selectedCompanyInn, empId);
       for (const unitPath of units) {
-        const perms = getUnitFolderPermissions(id, selectedCompanyInn, unitPath) as any;
-        const list: string[] | undefined = perms?.[role];
-        if (list && list.length) {
-          if (list.includes('Все папки')) return ['Все папки'];
-          list.forEach((p) => fromUnits.add(p));
+        // Наследуем права от всех предков подразделения: A, A / B, A / B / C
+        const parts = unitPath.split(' / ');
+        for (let i = 1; i <= parts.length; i++) {
+          const ancestor = parts.slice(0, i).join(' / ');
+          const perms = getUnitFolderPermissions(id, selectedCompanyInn, ancestor) as any;
+          const list: string[] | undefined = perms?.[role];
+          if (list && list.length) {
+            if (list.includes('Все папки')) return ['Все папки'];
+            list.forEach((p) => fromUnits.add(p));
+          }
         }
       }
     }
@@ -196,28 +217,9 @@ export default function ObjectTeam() {
     return Array.from(merged);
   };
 
-  // Назначение прав отдела на сотрудника (наследование при назначении на отдел)
-  const applyDeptRightsToEmployee = (empId: string, unitPath: string) => {
-    if (!id || !selectedCompanyInn) return;
-    const dept = getUnitFolderPermissions(id, selectedCompanyInn, unitPath) || {};
-    if (!dept) return;
-    setRoleAssignments((prev) => {
-      const current = prev[empId] || { roleFolders: {} as Record<RoleKey, string[]> };
-      const roleFolders = { ...(current.roleFolders || {}) } as Record<RoleKey, string[]>;
-      (['signatory','reviewer','observer','editor','deleter'] as RoleKey[]).forEach((rk) => {
-        const fromDept = (dept as any)[rk] as string[] | undefined;
-        if (!fromDept || fromDept.length === 0) return;
-        if (fromDept.includes('Все папки')) {
-          roleFolders[rk] = ['Все папки'];
-        } else {
-          const merged = new Set(roleFolders[rk] || []);
-          fromDept.forEach((f) => merged.add(f));
-          roleFolders[rk] = Array.from(merged);
-        }
-      });
-      return { ...prev, [empId]: { roleFolders } };
-    });
-  };
+  // Раньше мы копировали права отдела в персональные, сейчас этого не делаем,
+  // чтобы на UI права отображались как наследованные. Оставляем пустую заглушку.
+  const applyDeptRightsToEmployee = (_empId: string, _unitPath: string) => {};
 
   // Отдел: роли
   const toggleDeptRole = (role: RoleKey, checked: boolean) => {
@@ -507,10 +509,16 @@ export default function ObjectTeam() {
                           <div className="text-xs text-gray-500 mb-2">Нажмите на карточку, чтобы выбрать сотрудника</div>
                         )}
                         <div className={`space-y-3 ${isActive ? '' : 'pointer-events-none'}`}>
-                          {(['signatory', 'reviewer', 'observer', 'editor', 'deleter'] as RoleKey[]).map((role) => {
+                          {getAllowedRoleKeys(selectedCompanyInn).map((role) => {
                             const key = `${emp.id}:${role}`;
-                            const enabled = Boolean(roleAssignments[emp.id]?.roleFolders?.[role]);
+                            const personal = roleAssignments[emp.id]?.roleFolders?.[role] || [];
+                            const effective = getEffectiveFolders(emp.id, role);
+                            const enabled = effective.length > 0;
                             const label = getRoleFoldersLabel(emp.id, role);
+                            const inheritedOnly = enabled && personal.length === 0;
+                            const inheritedList = inheritedOnly
+                              ? (effective.includes('Все папки') ? ['Все папки'] : effective)
+                              : (effective.includes('Все папки') ? (personal.includes('Все папки') ? ['Все папки'] : ['Все папки']) : effective.filter((p) => !personal.includes(p)));
                             return (
                               <div key={role}>
                                 <div className="flex items-center space-x-2">
@@ -521,10 +529,13 @@ export default function ObjectTeam() {
                                   <span className="text-sm capitalize">
                                     {role === 'signatory' ? 'подписант' : role === 'reviewer' ? 'проверяющий' : role === 'observer' ? 'наблюдающий' : role === 'editor' ? 'редактирование' : 'чтение'}
                                   </span>
-                                  {Boolean(roleAssignments[emp.id]?.roleFolders?.[role]) && (
+                                  {enabled && (
                                     <span className="text-xs text-gray-500">({label})</span>
                                   )}
-                                  {Boolean(roleAssignments[emp.id]?.roleFolders?.[role]) && (
+                                  {inheritedOnly && (
+                                    <span className="text-[10px] text-amber-600">наследовано</span>
+                                  )}
+                                  {enabled && (
                                     <button
                                       type="button"
                                       onClick={() => togglePickerOpen(emp.id, role)}
@@ -536,6 +547,11 @@ export default function ObjectTeam() {
                                 </div>
                                 {enabled && openPickers[key] && (
                                   <div className="mt-2 ml-6 p-2 border rounded bg-gray-50 max-h-40 overflow-y-auto">
+                                    {inheritedList.length > 0 && (
+                                      <div className="text-[11px] text-gray-500 mb-2">
+                                        Наследовано из отдела: {inheritedList.join(', ')}
+                                      </div>
+                                    )}
                                     <label className="flex items-center space-x-2 mb-2">
                                       <Checkbox
                                         checked={Boolean(roleAssignments[emp.id]?.roleFolders?.[role]?.includes('Все папки'))}

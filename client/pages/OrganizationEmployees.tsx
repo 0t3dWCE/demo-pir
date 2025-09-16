@@ -787,56 +787,59 @@ export default function OrganizationEmployees() {
                                 <div>
                                   <div className="text-sm font-medium text-gray-500 mb-2">Роли</div>
                                   <div className="space-y-3">
-                                    {(['signatory', 'reviewer', 'observer', 'editor', 'deleter'] as RoleKey[]).map((role) => {
-                                      const key = `${employee.id}:${role}`;
-                                      const enabled = Boolean(roleAssignments[employee.id]?.roleFolders?.[role]);
-                                      const label = getRoleFoldersLabel(employee.id, role);
-                                      return (
-                                        <div key={role}>
-                                          <div className="flex items-center space-x-2">
-                                            <Checkbox
-                                              checked={enabled}
-                                              onCheckedChange={(val) => toggleRole(employee.id, role, Boolean(val))}
-                                            />
-                                            <span className="text-sm capitalize">
-                                              {role === 'signatory' ? 'подписант' : role === 'reviewer' ? 'проверяющий' : role === 'observer' ? 'наблюдающий' : role === 'editor' ? 'редактирование' : 'чтение'}
-                                            </span>
-                                            {Boolean(roleAssignments[employee.id]?.roleFolders?.[role]) && (
-                                              <span className="text-xs text-gray-500">({label})</span>
-                                            )}
-                                            {Boolean(roleAssignments[employee.id]?.roleFolders?.[role]) && (
-                                              <button
-                                                type="button"
-                                                onClick={() => togglePickerOpen(employee.id, role)}
-                                                className="text-xs text-blue-600 ml-2 hover:underline"
-                                              >
-                                                Настроить папки
-                                              </button>
+                                    {(() => {
+                                      const allowed = (['signatory', 'reviewer', 'observer', 'editor', 'deleter'] as RoleKey[]);
+                                      return allowed.map((role) => {
+                                        const key = `${employee.id}:${role}`;
+                                        const enabled = Boolean(roleAssignments[employee.id]?.roleFolders?.[role]);
+                                        const label = getRoleFoldersLabel(employee.id, role);
+                                        return (
+                                          <div key={role}>
+                                            <div className="flex items-center space-x-2">
+                                              <Checkbox
+                                                checked={enabled}
+                                                onCheckedChange={(val) => toggleRole(employee.id, role, Boolean(val))}
+                                              />
+                                              <span className="text-sm capitalize">
+                                                {role === 'signatory' ? 'подписант' : role === 'reviewer' ? 'проверяющий' : role === 'observer' ? 'наблюдающий' : role === 'editor' ? 'редактирование' : 'чтение'}
+                                              </span>
+                                              {Boolean(roleAssignments[employee.id]?.roleFolders?.[role]) && (
+                                                <span className="text-xs text-gray-500">({label})</span>
+                                              )}
+                                              {Boolean(roleAssignments[employee.id]?.roleFolders?.[role]) && (
+                                                <button
+                                                  type="button"
+                                                  onClick={() => togglePickerOpen(employee.id, role)}
+                                                  className="text-xs text-blue-600 ml-2 hover:underline"
+                                                >
+                                                  Настроить папки
+                                                </button>
+                                              )}
+                                            </div>
+                                            {enabled && openPickers[key] && (
+                                              <div className="mt-2 ml-6 p-2 border rounded bg-gray-50 max-h-40 overflow-y-auto">
+                                                <label className="flex items-center space-x-2 mb-2">
+                                                  <Checkbox
+                                                    checked={Boolean(roleAssignments[employee.id]?.roleFolders?.[role]?.includes('Все папки'))}
+                                                    onCheckedChange={(val) => toggleFolderForRole(employee.id, role, 'Все папки', Boolean(val))}
+                                                  />
+                                                  <span className="text-sm">Все папки</span>
+                                                </label>
+                                                {allFolders.map((p) => (
+                                                  <label key={p} className="flex items-center space-x-2">
+                                                    <Checkbox
+                                                      checked={Boolean(roleAssignments[employee.id]?.roleFolders?.[role]?.includes(p))}
+                                                      onCheckedChange={(val) => toggleFolderForRole(employee.id, role, p, Boolean(val))}
+                                                    />
+                                                    <span className="text-sm">{p}</span>
+                                                  </label>
+                                                ))}
+                                              </div>
                                             )}
                                           </div>
-                                          {enabled && openPickers[key] && (
-                                            <div className="mt-2 ml-6 p-2 border rounded bg-gray-50 max-h-40 overflow-y-auto">
-                                              <label className="flex items-center space-x-2 mb-2">
-                                                <Checkbox
-                                                  checked={Boolean(roleAssignments[employee.id]?.roleFolders?.[role]?.includes('Все папки'))}
-                                                  onCheckedChange={(val) => toggleFolderForRole(employee.id, role, 'Все папки', Boolean(val))}
-                                                />
-                                                <span className="text-sm">Все папки</span>
-                                              </label>
-                                              {allFolders.map((p) => (
-                                                <label key={p} className="flex items-center space-x-2">
-                                                  <Checkbox
-                                                    checked={Boolean(roleAssignments[employee.id]?.roleFolders?.[role]?.includes(p))}
-                                                    onCheckedChange={(val) => toggleFolderForRole(employee.id, role, p, Boolean(val))}
-                                                  />
-                                                  <span className="text-sm">{p}</span>
-                                                </label>
-                                              ))}
-                                            </div>
-                                          )}
-                                        </div>
-                                      );
-                                    })}
+                                        );
+                                      });
+                                    })()}
                                   </div>
                                 </div>
                               </div>
