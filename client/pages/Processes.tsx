@@ -73,6 +73,7 @@ interface ProcessStep {
   canSkip: boolean;
   autoReject: boolean;
   rules: StepRule[];
+  rejectGoToOrder?: number;
 }
 
 interface Participant {
@@ -105,6 +106,7 @@ type NewStepForm = {
   // новый флаг: параллельный шаг и к какому порядку он относится
   isParallel?: boolean;
   parallelOfOrder?: number;
+  rejectGoToOrder?: number;
 };
 
 const mockProcesses: Process[] = [
@@ -299,6 +301,7 @@ export default function Processes() {
     canSkip: boolean;
     autoReject: boolean;
     requireAll: boolean;
+    rejectGoToOrder?: number;
   }>>>({});
   // Хранение количества параллельных веток для каждого шага (processId -> order -> count)
   const [parallelMap, setParallelMap] = useState<Record<string, Record<number, number>>>({});
@@ -596,16 +599,15 @@ export default function Processes() {
     const steps = processStepsMap[processId] || [];
     const step = steps[stepIndex];
     if (!step) return;
-    const rules = step.rules || [];
-    const getRule = (t: any) => rules.find(r => r.type === t)?.enabled ?? false;
     const draft = {
       name: step.name,
       timeLimit: step.timeLimit,
       isRequired: step.isRequired,
       canFinishOnThis: step.canFinishOnThis,
       canSkip: step.canSkip,
-      autoReject: getRule('auto_reject'),
-      requireAll: getRule('all_required')
+      autoReject: false,
+      requireAll: false,
+      rejectGoToOrder: step.rejectGoToOrder
     };
     setEditingSteps(prev => ({ ...prev, [processId]: { ...(prev[processId] || {}), [stepIndex]: draft } }));
   };
@@ -625,12 +627,8 @@ export default function Processes() {
     const steps = processStepsMap[processId] || [];
     const step = steps[stepIndex];
     if (!step) return;
-    const newRules = [
-      { id: `rule-all-${Date.now()}`, type: 'all_required', enabled: draft.requireAll, description: 'Требуется проверка всех участников шага' },
-      { id: `rule-af-${Date.now()}`, type: 'can_finish', enabled: draft.canFinishOnThis, description: 'Возможность завершить согласование на текущем шаге' },
-      { id: `rule-ar-${Date.now()}`, type: 'auto_reject', enabled: draft.autoReject, description: 'Отклонение при несогласовании' }
-    ];
-    const updatedStep = { ...step, name: draft.name, timeLimit: draft.timeLimit, isRequired: draft.isRequired, canFinishOnThis: draft.canFinishOnThis, canSkip: draft.canSkip, autoReject: draft.autoReject, rules: newRules } as ProcessStep;
+    const newRules: StepRule[] = [];
+    const updatedStep = { ...step, name: draft.name, timeLimit: draft.timeLimit, rejectGoToOrder: draft.rejectGoToOrder, rules: newRules } as ProcessStep;
     const updatedSteps = steps.map((s, i) => i === stepIndex ? updatedStep : s);
     setProcessStepsMap({ ...processStepsMap, [processId]: updatedSteps });
     cancelEditStep(processId, stepIndex);
@@ -996,18 +994,7 @@ export default function Processes() {
                             <Copy className="w-4 h-4 mr-2" />
                             Дублировать
                           </Button>
-                          {process.status === 'active' ? (
-                            <Button variant="outline" size="sm">
-                              <Pause className="w-4 h-4 mr-2" />
-                              Деактивировать
-                            </Button>
-                          ) : (
-                            <Button variant="outline" size="sm">
-                              <Play className="w-4 h-4 mr-2" />
-                              Активировать
-                            </Button>
-                          )}
-                          <Button variant="outline" size="sm" onClick={() => handleArchiveProcess(process.id)}>
+                          <Button variant="outline" size="sm" disabled={process.status === 'active'} onClick={() => handleArchiveProcess(process.id)}>
                             <Trash2 className="w-4 h-4 mr-2" />
                             Архивировать
                           </Button>
@@ -1417,66 +1404,36 @@ export default function Processes() {
                                 {(function(){
                                   const isEditing = Boolean(editingSteps[selectedProcess.id]?.[index]);
                                   const draft = editingSteps[selectedProcess.id]?.[index];
-                                  const requiredChecked = isEditing ? (draft?.isRequired ?? step.isRequired) : step.isRequired;
-                                  const canSkipChecked = isEditing ? (draft?.canSkip ?? step.canSkip) : step.canSkip;
+                                  const rejectTarget = isEditing ? draft?.rejectGoToOrder : step.rejectGoToOrder;
                                   return (
-                                    <>
-                                      <div className="flex items-center space-x-2">
-                                        <Checkbox checked={requiredChecked} disabled={!isEditing} onCheckedChange={(v)=>{
-                                          if(!isEditing) return;
-                                          const procDraft = editingSteps[selectedProcess.id] || {};
-                                          const d = procDraft[index] || {} as any;
-                                          const updated = { ...d, isRequired: Boolean(v) };
-                                          setEditingSteps({ ...editingSteps, [selectedProcess.id]: { ...procDraft, [index]: updated } });
-                                        }} />
-                                        <span className="text-sm">Обязательный шаг</span>
-                                      </div>
-                                      <div className="flex items-center space-x-2">
-                                        <Checkbox checked={canSkipChecked} disabled={!isEditing} onCheckedChange={(v)=>{
-                                          if(!isEditing) return;
-                                          const procDraft = editingSteps[selectedProcess.id] || {};
-                                          const d = procDraft[index] || {} as any;
-                                          const updated = { ...d, canSkip: Boolean(v) };
-                                          setEditingSteps({ ...editingSteps, [selectedProcess.id]: { ...procDraft, [index]: updated } });
-                                        }} />
-                                        <span className="text-sm">Можно пропустить</span>
-                                      </div>
-                                    </>
+                                    <div className="flex items-center gap-3">
+                                      <Checkbox checked={Boolean(rejectTarget)} disabled={!isEditing} onCheckedChange={(v)=>{
+                                        if(!isEditing) return;
+                                        const procDraft = editingSteps[selectedProcess.id] || {};
+                                        const d = procDraft[index] || {} as any;
+                                        const updated = { ...d, rejectGoToOrder: Boolean(v) ? (rejectTarget || 1) : undefined };
+                                        setEditingSteps({ ...editingSteps, [selectedProcess.id]: { ...procDraft, [index]: updated } });
+                                      }} />
+                                      <span className="text-sm">Переход при отклонении</span>
+                                      <Select disabled={!isEditing || !rejectTarget} value={String(rejectTarget || '')} onValueChange={(v)=>{
+                                        if(!isEditing) return;
+                                        const procDraft = editingSteps[selectedProcess.id] || {};
+                                        const d = procDraft[index] || {} as any;
+                                        const updated = { ...d, rejectGoToOrder: Number(v) };
+                                        setEditingSteps({ ...editingSteps, [selectedProcess.id]: { ...procDraft, [index]: updated } });
+                                      }}>
+                                        <SelectTrigger className="w-48">
+                                          <SelectValue placeholder="Шаг" />
+                                        </SelectTrigger>
+                                        <SelectContent className="w-[--radix-select-trigger-width]">
+                                          {(processStepsMap[selectedProcess.id] || []).map((s)=> (
+                                            <SelectItem key={`rej-${s.order}`} value={String(s.order)}>Шаг {s.order}: {s.name}</SelectItem>
+                                          ))}
+                                        </SelectContent>
+                                      </Select>
+                                    </div>
                                   );
                                 })()}
-                                {step.rules.map((rule) => {
-                                  const isEditing = Boolean(editingSteps[selectedProcess.id]?.[index]);
-                                  const draft = editingSteps[selectedProcess.id]?.[index];
-                                  const currentChecked = isEditing
-                                    ? (rule.type === 'all_required'
-                                      ? draft.requireAll
-                                      : rule.type === 'can_finish'
-                                        ? draft.canFinishOnThis
-                                        : rule.type === 'auto_reject'
-                                          ? draft.autoReject
-                                          : rule.enabled)
-                                    : rule.enabled;
-                                  return (
-                                  <div key={rule.id} className="flex items-center space-x-2">
-                                      <Checkbox
-                                        checked={currentChecked}
-                                        disabled={!isEditing}
-                                        onCheckedChange={(v) => {
-                                          if (!isEditing) return;
-                                          const procDraft = editingSteps[selectedProcess.id] || {};
-                                          const d = procDraft[index];
-                                          if (!d) return;
-                                          const updated = { ...d } as any;
-                                          if (rule.type === 'all_required') updated.requireAll = Boolean(v);
-                                          if (rule.type === 'can_finish') updated.canFinishOnThis = Boolean(v);
-                                          if (rule.type === 'auto_reject') updated.autoReject = Boolean(v);
-                                          setEditingSteps({ ...editingSteps, [selectedProcess.id]: { ...procDraft, [index]: updated } });
-                                        }}
-                                      />
-                                      <span className="text-sm">{rule.type === 'can_finish' ? 'Возможность проставить статус согласования' : rule.description}</span>
-                                  </div>
-                                  );
-                                })}
                                 
                                 <div className="pt-2 border-t border-gray-200">
                                   <div className="grid grid-cols-3 gap-2">
@@ -1604,15 +1561,15 @@ export default function Processes() {
                     </label>
                     <label className="flex items-center space-x-2 text-sm">
                       <Checkbox checked={assigneeBy === 'position_in_department'} onCheckedChange={() => setAssigneeBy('position_in_department')} />
-                      <span>Должность в конкретном департаменте</span>
+                      <span>Должность в департаменте</span>
                     </label>
                     <label className="flex items-center space-x-2 text-sm">
                       <Checkbox checked={assigneeBy === 'position'} onCheckedChange={() => setAssigneeBy('position')} />
-                      <span>Конкретная должность</span>
+                      <span>Должность</span>
                     </label>
                     <label className="flex items-center space-x-2 text-sm">
                       <Checkbox checked={assigneeBy === 'department'} onCheckedChange={() => setAssigneeBy('department')} />
-                      <span>Конкретный департамент</span>
+                      <span>Департамент</span>
                     </label>
                   </div>
                   {(assigneeBy === 'position_in_department' || assigneeBy === 'department') && (
@@ -1646,10 +1603,7 @@ export default function Processes() {
                   )}
                 </CardContent>
               </Card>
-              <div className="flex items-center space-x-2">
-                <Button variant={assigneePickerMode === 'company' ? 'default' : 'outline'} size="sm" onClick={() => setAssigneePickerMode('company')}>Из компании</Button>
-                <Button variant={assigneePickerMode === 'project' ? 'default' : 'outline'} size="sm" onClick={() => setAssigneePickerMode('project')}>Из объекта</Button>
-              </div>
+              {/* Источник оставляем только "Из компании" */}
 
               {assigneePickerMode === 'company' && (
                 <div className="space-y-2">
@@ -1668,21 +1622,7 @@ export default function Processes() {
                 </div>
               )}
 
-              {assigneePickerMode === 'project' && selectedProcess && (
-                <div className="space-y-2">
-                  <Label>Объект</Label>
-                  <Select onValueChange={(pid) => loadEmployeesFromProject(pid)}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Выберите объект" />
-                    </SelectTrigger>
-                    <SelectContent className="w-[--radix-select-trigger-width]">
-                      {pickerProjects.map(p => (
-                        <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              )}
+              {/* Блок выбора из объекта удалён по требованию */}
 
               <div className="border rounded p-3 max-h-64 overflow-y-auto">
                 {availableEmployees.length === 0 ? (
